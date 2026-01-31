@@ -1,0 +1,678 @@
+"""
+data_processing.py
+-------------------
+All feature engineering and preprocessing logic.
+
+Public API used from the notebook:
+    load_data(path)                -> DataFrame
+    feature_engineer(X, y)         -> X_engineered, column_lists_dict
+    build_ml_preprocessor(cols)    -> preprocessor, global_scaler
+    build_dl_preprocessor(cols)    -> dl_preprocessor
+    prepare_ml_data(path)          -> X, y, preprocessor, global_scaler
+    prepare_dl_data(path, ...)     -> dict with splits, encoders, metadata
+"""
+
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import (
+    FunctionTransformer,
+    LabelEncoder,
+    MinMaxScaler,
+    OneHotEncoder,
+    OrdinalEncoder,
+    PowerTransformer,
+    RobustScaler,
+    StandardScaler,
+    TargetEncoder,
+)
+
+from config import SEED, TRAIN_CSV
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 1.  LOADING
+# ══════════════════════════════════════════════════════════════════════════════
+
+def load_data(path: str = TRAIN_CSV) -> pd.DataFrame:
+    """Load CSV, drop exact-duplicate rows, return DataFrame."""
+    df = pd.read_csv(path)
+    n_dup = df.duplicated().sum()
+    df.drop_duplicates(inplace=True)
+    print(f"Loaded {len(df)} rows  (dropped {n_dup} duplicates)")
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2.  FEATURE ENGINEERING  (faithfully preserves your notebook logic)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ---------- helpers used inside feature_engineer ----------
+
+_REGIONS = {
+    "northeast": ["ct", "me", "ma", "nh", "ri", "vt", "nj", "ny", "pa"],
+    "midwest": ["il", "in", "mi", "oh", "wi", "ia", "ks", "mn", "mo",
+                 "ne", "nd", "sd"],
+    "south": ["de", "fl", "ga", "md", "nc", "sc", "va", "wv", "dc",
+              "al", "ky", "ms", "tn", "ar", "la", "ok", "tx"],
+    "west": ["az", "co", "id", "mt", "nv", "nm", "ut", "wy", "ak",
+             "ca", "hi", "or", "wa"],
+}
+
+_NO_INCOME_TAX_STATES = {"ak", "fl", "nv", "sd", "tn", "tx", "wa", "wy"}
+
+_STATUS_MAP = {
+    "does not meet the credit policy. status:fully paid": "fully paid",
+    "does not meet the credit policy. status:charged off": "charged off",
+    "default": "charged off",
+}
+
+_RISK_ORDER = {
+    "fully paid": 0,
+    "current": 1,
+    "in grace period": 2,
+    "late (16-30 days)": 3,
+    "late (31-120 days)": 4,
+    "charged off": 5,
+}
+
+
+def _get_state_region(state: str) -> str:
+    s = str(state).lower()
+    for region, states in _REGIONS.items():
+        if s in states:
+            return region
+    return "unknown"
+
+
+def _get_zip_region(zip_code) -> str:
+    try:
+        first = int(str(zip_code)[0])
+        if first in (0, 1):
+            return "northeast"
+        elif first in (2, 3):
+            return "southeast"
+        elif first in (4, 5):
+            return "midwest"
+        elif first in (6, 7):
+            return "south_central"
+        elif first == 8:
+            return "mountain"
+        elif first == 9:
+            return "pacific"
+    except Exception:
+        return "unknown"
+    return "unknown"
+
+
+class LoanTitleProcessor(BaseEstimator, TransformerMixin):
+    """Semantic grouping + frequency features for loan_title."""
+
+    CATEGORY_PATTERNS = {
+        "debt_consolidation": ["debt consolidation", "consolidation",
+                               "consolidate", "debt consol", "consol",
+                               "payoff", "pay off"],
+        "credit_card": ["credit card", "cc ", "card"],
+        "home_improvement": ["home improvement", "home repair",
+                             "renovation", "remodel"],
+        "major_purchase": ["major purchase", "large purchase"],
+        "medical": ["medical", "health", "dental", "hospital"],
+        "car": ["car", "auto", "vehicle", "motorcycle", "bike"],
+        "business": ["business", "startup", "small business"],
+        "moving": ["moving", "relocation", "relocate"],
+        "home_buying": ["home buying", "house", "mortgage"],
+        "vacation": ["vacation", "travel", "trip"],
+        "wedding": ["wedding", "marriage"],
+        "education": ["education", "student", "tuition", "school"],
+    }
+
+    def __init__(self):
+        self.value_counts_ = None
+
+    def fit(self, X, y=None):
+        if "loan_title" in X.columns:
+            titles = X["loan_title"].fillna("missing").str.lower().str.strip()
+            self.value_counts_ = titles.value_counts()
+        return self
+
+    def _categorize(self, title):
+        if pd.isna(title) or title == "":
+            return "missing"
+        title = str(title).lower().strip()
+        if title == "other":
+            return "other"
+        for cat, patterns in self.CATEGORY_PATTERNS.items():
+            for p in patterns:
+                if p in title:
+                    return cat
+        return "other_uncategorized"
+
+    def transform(self, X):
+        X = X.copy()
+        if "loan_title" not in X.columns:
+            return X
+        titles = X["loan_title"].fillna("missing").str.lower().str.strip()
+        X["loan_category"] = titles.apply(self._categorize)
+        X["loan_title_frequency"] = titles.map(self.value_counts_).fillna(0)
+        X["loan_title_log_frequency"] = np.log1p(X["loan_title_frequency"])
+        X["loan_title_is_custom"] = (X["loan_title_frequency"] < 10).astype(int)
+        X["loan_title_word_count"] = titles.str.split().str.len()
+        X["loan_title_has_numbers"] = (
+            titles.str.contains(r"\d", regex=True).astype(int)
+        )
+        X.drop(columns=["loan_title"], inplace=True)
+        return X
+
+
+# ---------- main feature engineering function ----------
+
+def feature_engineer(X: pd.DataFrame, y=None):
+    """
+    Apply ALL feature-engineering steps from the notebook.
+
+    Parameters
+    ----------
+    X : DataFrame   –  raw features (grade already dropped)
+    y : array-like  –  target (unused here, kept for pipeline compat)
+
+    Returns
+    -------
+    X : DataFrame   –  engineered features
+    col_lists : dict with keys
+        "normal_dist", "safe_log_cols", "negative_cols",
+        "ordinal_cols", "one_hot_cols", "target_encode_cols"
+    """
+    X = X.copy()
+
+    # ── 2a. Drop cols with > 50 % missing ────────────────────────────
+    miss = X.isna().mean()
+    drop_high_miss = miss[miss > 0.50].index.tolist()
+    X.drop(columns=drop_high_miss, inplace=True, errors="ignore")
+    print(f"Dropped {len(drop_high_miss)} cols with >50% missing")
+
+    # ── 2b. Drop collinear (r > 0.95) ────────────────────────────────
+    num_df = X.select_dtypes(include=[np.number])
+    corr = num_df.corr().abs()
+    upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+    collinear_drop = [c for c in upper.columns if any(upper[c] > 0.95)]
+    X.drop(columns=collinear_drop, inplace=True, errors="ignore")
+    print(f"Dropped {len(collinear_drop)} collinear cols")
+
+    # ── 2c. Convert hidden-numeric columns ────────────────────────────
+    if "loan_contract_term_months" in X.columns:
+        X["loan_contract_term_months"] = pd.to_numeric(
+            X["loan_contract_term_months"].str.replace(" months", ""),
+            errors="coerce",
+        )
+        mode_val = X["loan_contract_term_months"].mode()[0]
+        X["loan_contract_term_months"].fillna(mode_val, inplace=True)
+
+    if "borrower_profile_employment_length" in X.columns:
+        X["borrower_profile_employment_length"] = (
+            X["borrower_profile_employment_length"]
+            .replace({"< 1 year": "0 years", "10+ years": "10 years"})
+        )
+        X["borrower_profile_employment_length"] = (
+            X["borrower_profile_employment_length"]
+            .str.extract(r"(\d+)").astype(float)
+        )
+        med = X["borrower_profile_employment_length"].median()
+        X["borrower_profile_employment_length"].fillna(med, inplace=True)
+
+    # ── 2d. Cyclical date encoding ────────────────────────────────────
+    date_cols = [
+        "loan_issue_date",
+        "credit_history_earliest_line",
+        "last_payment_date",
+        "last_credit_pull_date",
+    ]
+    for col in date_cols:
+        if col in X.columns:
+            X[col] = pd.to_datetime(X[col], format="%b-%Y", errors="coerce")
+
+    if {"loan_issue_date", "credit_history_earliest_line"}.issubset(X.columns):
+        X["credit_history_length_months"] = (
+            (X["loan_issue_date"] - X["credit_history_earliest_line"]).dt.days / 30
+        )
+
+    ref_date = pd.Timestamp("2020-01-01")
+    for col in date_cols:
+        if col in X.columns:
+            X[f"{col}_year"] = X[col].dt.year
+            month = X[col].dt.month
+            X[f"{col}_month_sin"] = np.sin(2 * np.pi * month / 12)
+            X[f"{col}_month_cos"] = np.cos(2 * np.pi * month / 12)
+            X[f"{col}_quarter"] = X[col].dt.quarter
+            X[f"{col}_days_since_ref"] = (X[col] - ref_date).dt.days
+            X.drop(columns=[col], inplace=True)
+
+    # ── 2e. Categorical analysis ──────────────────────────────────────
+    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    ordinal_cols = []
+    one_hot_cols = []
+    target_encode_cols = []
+
+    for col in cat_cols:
+        n = X[col].nunique()
+        if n == 2:
+            ordinal_cols.append(col)
+        elif n <= 51:
+            one_hot_cols.append(col)
+        # high cardinality handled explicitly below
+
+    # ── 2f. borrower_housing_ownership_status ─────────────────────────
+    if "borrower_housing_ownership_status" in X.columns:
+        X["borrower_housing_ownership_status"] = (
+            X["borrower_housing_ownership_status"]
+            .replace({"none": "other", "any": "other"})
+            .fillna("other")
+        )
+
+    # ── 2g. borrower_income_verification_status ───────────────────────
+    if "borrower_income_verification_status" in X.columns:
+        X["borrower_income_verification_status"].fillna(
+            "not verified", inplace=True
+        )
+
+    # ── 2h. loan_status_current_code  (ordinal mapping) ──────────────
+    if "loan_status_current_code" in X.columns:
+        X["loan_status_current_code"] = (
+            X["loan_status_current_code"].replace(_STATUS_MAP)
+        )
+        X["loan_status_current_code"] = (
+            X["loan_status_current_code"].map(_RISK_ORDER)
+        )
+        med_status = X["loan_status_current_code"].median()
+        X["loan_status_current_code"].fillna(med_status, inplace=True)
+        if "loan_status_current_code" in one_hot_cols:
+            one_hot_cols.remove("loan_status_current_code")
+
+    # ── 2i. borrower_address_state -> region features ─────────────────
+    if "borrower_address_state" in X.columns:
+        X["borrower_address_state"].fillna("unknown", inplace=True)
+        X["state_region"] = X["borrower_address_state"].apply(_get_state_region)
+        X["state_no_income_tax"] = (
+            X["borrower_address_state"]
+            .str.lower()
+            .isin(_NO_INCOME_TAX_STATES)
+            .astype("float64")
+        )
+        state_counts = X["borrower_address_state"].value_counts()
+        X["state_log_frequency"] = np.log1p(
+            X["borrower_address_state"].map(state_counts)
+        )
+        target_encode_cols.append("borrower_address_state")
+        if "borrower_address_state" in one_hot_cols:
+            one_hot_cols.remove("borrower_address_state")
+        one_hot_cols.append("state_region")
+
+    # ── 2j. borrower_address_zip -> region + frequency ────────────────
+    if "borrower_address_zip" in X.columns:
+        X["borrower_address_zip"].fillna("unknown", inplace=True)
+        X["zip3_prefix"] = X["borrower_address_zip"].str[:3]
+        X["zip_region"] = X["borrower_address_zip"].apply(_get_zip_region)
+        zip_counts = X["zip3_prefix"].value_counts()
+        X["zip_log_frequency"] = np.log1p(X["zip3_prefix"].map(zip_counts))
+        X.drop(columns=["borrower_address_zip"], inplace=True)
+        one_hot_cols.append("zip_region")
+        target_encode_cols.append("zip3_prefix")
+
+    # ── 2k. loan_title processing ─────────────────────────────────────
+    if "loan_title" in X.columns:
+        proc = LoanTitleProcessor()
+        proc.fit(X)
+        X = proc.transform(X)
+        # loan_category goes to one-hot
+        one_hot_cols.append("loan_category")
+
+    # ── 2l. Drop loan_purpose_category ────────────────────────────────
+    if "loan_purpose_category" in X.columns:
+        X.drop(columns=["loan_purpose_category"], inplace=True)
+        if "loan_purpose_category" in one_hot_cols:
+            one_hot_cols.remove("loan_purpose_category")
+
+    # ── 2m. Convert remaining Int64 -> float64 ────────────────────────
+    int_cols = X.select_dtypes(include=["int64"]).columns.tolist()
+    X[int_cols] = X[int_cols].astype("float64")
+
+    # ── 2n. Skewness analysis on numeric cols ─────────────────────────
+    numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    skewness = X[numeric_cols].apply(lambda c: c.skew())
+    highly_skewed = skewness[skewness.abs() > 1].index.tolist()
+    normal_dist = skewness[skewness.abs() <= 1].index.tolist()
+    negative_cols = [c for c in highly_skewed if (X[c] < 0).any()]
+    safe_log_cols = [c for c in highly_skewed if c not in negative_cols]
+
+    # ── Clean up column lists (ensure they still exist) ───────────────
+    existing = set(X.columns)
+    ordinal_cols = [c for c in ordinal_cols if c in existing]
+    one_hot_cols = [c for c in one_hot_cols if c in existing]
+    target_encode_cols = [c for c in target_encode_cols if c in existing]
+    normal_dist = [c for c in normal_dist if c in existing]
+    safe_log_cols = [c for c in safe_log_cols if c in existing]
+    negative_cols = [c for c in negative_cols if c in existing]
+
+    col_lists = {
+        "normal_dist": normal_dist,
+        "safe_log_cols": safe_log_cols,
+        "negative_cols": negative_cols,
+        "ordinal_cols": ordinal_cols,
+        "one_hot_cols": one_hot_cols,
+        "target_encode_cols": target_encode_cols,
+    }
+
+    print(f"Feature engineering done  ->  {X.shape[1]} features")
+    print(f"  normal_dist      : {len(normal_dist)}")
+    print(f"  safe_log_cols    : {len(safe_log_cols)}")
+    print(f"  negative_cols    : {len(negative_cols)}")
+    print(f"  ordinal_cols     : {len(ordinal_cols)}")
+    print(f"  one_hot_cols     : {len(one_hot_cols)}")
+    print(f"  target_encode_cols: {len(target_encode_cols)}")
+
+    return X, col_lists
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3.  ML PREPROCESSOR  (for RF / KNN / SVM – same as your notebook)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_ml_preprocessor(col_lists: dict, seed: int = SEED):
+    """
+    Build the ColumnTransformer + global scaler used by sklearn pipelines.
+
+    Returns
+    -------
+    preprocessor   : ColumnTransformer
+    global_scaler  : ColumnTransformer  (RobustScaler on all non-OHE cols)
+    """
+    normal_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+    ])
+
+    log_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("log", FunctionTransformer(
+            np.log1p, validate=False, feature_names_out="one-to-one"
+        )),
+    ])
+
+    power_transformer_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("power", PowerTransformer(method="yeo-johnson", standardize=False)),
+    ])
+
+    target_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+        ("target_enc", TargetEncoder(random_state=seed)),
+    ])
+
+    ordinal_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+        ("encoder", OrdinalEncoder(
+            handle_unknown="use_encoded_value", unknown_value=-1
+        )),
+    ])
+
+    one_hot_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ])
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("normal", normal_transformer, col_lists["normal_dist"]),
+            ("skewed", log_transformer, col_lists["safe_log_cols"]),
+            ("power", power_transformer_pipe, col_lists["negative_cols"]),
+            ("target_enc", target_transformer, col_lists["target_encode_cols"]),
+            ("ordinal", ordinal_transformer, col_lists["ordinal_cols"]),
+            ("one_hot", one_hot_transformer, col_lists["one_hot_cols"]),
+        ],
+        n_jobs=-1,
+        verbose_feature_names_out=False,
+    )
+
+    n_scalable = (
+        len(col_lists["normal_dist"])
+        + len(col_lists["safe_log_cols"])
+        + len(col_lists["negative_cols"])
+        + len(col_lists["ordinal_cols"])
+        + len(col_lists["target_encode_cols"])
+    )
+    global_scaler = ColumnTransformer(
+        transformers=[
+            ("scaler_op", RobustScaler(), slice(0, n_scalable)),
+        ],
+        remainder="passthrough",
+    )
+
+    return preprocessor, global_scaler
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4.  DL PREPROCESSOR  (ordinal cats, StandardScaler, no one-hot)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_dl_preprocessor(X_reference: pd.DataFrame):
+    """
+    Build a DL-specific ColumnTransformer.
+
+    * Numeric cols  -> median impute -> log1p(clip) -> StandardScaler
+    * Categorical cols -> "missing" impute -> OrdinalEncoder  (integer output)
+
+    Parameters
+    ----------
+    X_reference : DataFrame (e.g. X_train) used only to detect column dtypes.
+
+    Returns
+    -------
+    dl_preprocessor : ColumnTransformer
+    numerical_cols  : list[str]
+    categorical_cols: list[str]
+    """
+    numerical_cols = X_reference.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = X_reference.select_dtypes(include=["object", "category"]).columns.tolist()
+    if "grade" in categorical_cols:
+        categorical_cols.remove("grade")
+
+    dl_numeric_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("log", FunctionTransformer(
+            func=lambda X: np.log1p(np.clip(X, 0, None)),
+            validate=False,
+        )),
+        ("scaler", StandardScaler()),
+    ])
+
+    dl_categorical_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+        ("ordinal", OrdinalEncoder(
+            handle_unknown="use_encoded_value", unknown_value=-1
+        )),
+    ])
+
+    dl_preprocessor = ColumnTransformer([
+        ("num", dl_numeric_transformer, numerical_cols),
+        ("cat", dl_categorical_transformer, categorical_cols),
+    ], remainder="drop")
+
+    return dl_preprocessor, numerical_cols, categorical_cols
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5.  HIGH-LEVEL CONVENIENCE: prepare_ml_data  /  prepare_dl_data
+# ══════════════════════════════════════════════════════════════════════════════
+
+def prepare_ml_data(path: str = TRAIN_CSV, seed: int = SEED):
+    """
+    Full pipeline for traditional ML:
+      load -> separate X/y -> feature_engineer -> build preprocessor
+
+    Returns
+    -------
+    X, y, col_lists, preprocessor, global_scaler
+    """
+    df = load_data(path)
+    X = df.drop(columns=["grade"])
+    y = df["grade"]
+
+    le = LabelEncoder()
+    y = le.fit_transform(y)
+
+    X, col_lists = feature_engineer(X)
+    preprocessor, global_scaler = build_ml_preprocessor(col_lists, seed)
+
+    return X, y, col_lists, preprocessor, global_scaler, le
+
+
+def prepare_dl_data(
+    path: str = TRAIN_CSV,
+    val_size: float = 0.10,
+    test_size: float = 0.10,
+    seed: int = SEED,
+):
+    """
+    Full pipeline for DL models:
+      load -> split -> feature_engineer (fit on train) -> DL preprocess
+
+    Returns
+    -------
+    dict with keys:
+        X_train, X_val, X_test          – numpy arrays (processed)
+        y_train, y_val, y_test           – numpy int arrays
+        label_encoder                    – fitted LabelEncoder
+        dl_preprocessor                  – fitted ColumnTransformer
+        numerical_cols, categorical_cols – column name lists
+        cat_cardinalities                – list[int]  (for TabNet/TabTransformer)
+        num_cat_cols                     – number of categorical columns
+        num_num_cols                     – number of numerical columns
+        cat_indices                      – list of cat column indices in processed array
+        cont_mean_std                    – (n_num, 2) array of mean/std (for TabTransformer)
+    """
+    df = load_data(path)
+    X_full = df.drop(columns=["grade"])
+    y_full = df["grade"]
+
+    # Encode target
+    le = LabelEncoder()
+    y_encoded = le.fit_transform(y_full)
+
+    # First split: separate test
+    X_temp, X_test, y_temp, y_test = train_test_split(
+        X_full, y_encoded,
+        test_size=test_size,
+        stratify=y_encoded,
+        random_state=seed,
+    )
+
+    # Second split: separate val from remaining
+    relative_val = val_size / (1 - test_size)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_temp, y_temp,
+        test_size=relative_val,
+        stratify=y_temp,
+        random_state=seed,
+    )
+
+    print(f"Train: {len(X_train)} ({len(X_train)/len(X_full)*100:.1f}%)")
+    print(f"Val  : {len(X_val)} ({len(X_val)/len(X_full)*100:.1f}%)")
+    print(f"Test : {len(X_test)} ({len(X_test)/len(X_full)*100:.1f}%)")
+
+    # Feature engineering – fit statistics on TRAIN only
+    # We need to apply the same transforms to val/test without re-fitting
+    # frequency/count columns, so we build on train, then align val/test.
+    X_train, col_lists = feature_engineer(X_train)
+    X_val = _apply_feature_engineer_transform(X_val, X_train)
+    X_test = _apply_feature_engineer_transform(X_test, X_train)
+
+    # Build DL preprocessor from train columns
+    dl_preprocessor, numerical_cols, categorical_cols = build_dl_preprocessor(X_train)
+
+    # Fit on train, transform all splits
+    X_train_proc = dl_preprocessor.fit_transform(X_train)
+    X_val_proc = dl_preprocessor.transform(X_val)
+    X_test_proc = dl_preprocessor.transform(X_test)
+
+    # Handle sparse output
+    if hasattr(X_train_proc, "toarray"):
+        X_train_proc = X_train_proc.toarray()
+        X_val_proc = X_val_proc.toarray()
+        X_test_proc = X_test_proc.toarray()
+
+    # Compute metadata for TabNet / TabTransformer
+    n_num = len(numerical_cols)
+    n_cat = len(categorical_cols)
+    cat_indices = list(range(n_num, n_num + n_cat))
+
+    # Cardinalities: max observed value + 2 (for unknown=-1 mapped to 0 later)
+    cat_cardinalities = []
+    for i in range(n_cat):
+        col_idx = n_num + i
+        max_val = max(
+            X_train_proc[:, col_idx].max(),
+            X_val_proc[:, col_idx].max(),
+            X_test_proc[:, col_idx].max(),
+        )
+        cat_cardinalities.append(int(max_val) + 2)  # +2 for 0-index + unknown
+
+    # Continuous mean/std for TabTransformer (computed from train only)
+    cont_mean = X_train_proc[:, :n_num].mean(axis=0)
+    cont_std = X_train_proc[:, :n_num].std(axis=0)
+    cont_std[cont_std == 0] = 1.0  # avoid division by zero
+    cont_mean_std = np.stack([cont_mean, cont_std], axis=1)  # shape (n_num, 2)
+
+    # Ordered feature names: [numerical_cols..., categorical_cols...]
+    # This matches the column order in the processed arrays.
+    feature_names = numerical_cols + categorical_cols
+
+    return {
+        "X_train": X_train_proc.astype(np.float32),
+        "X_val": X_val_proc.astype(np.float32),
+        "X_test": X_test_proc.astype(np.float32),
+        "y_train": y_train,
+        "y_val": y_val,
+        "y_test": y_test,
+        "label_encoder": le,
+        "dl_preprocessor": dl_preprocessor,
+        "numerical_cols": numerical_cols,
+        "categorical_cols": categorical_cols,
+        "feature_names": feature_names,
+        "num_num_cols": n_num,
+        "num_cat_cols": n_cat,
+        "cat_indices": cat_indices,
+        "cat_cardinalities": cat_cardinalities,
+        "cont_mean_std": cont_mean_std,
+        "col_lists": col_lists,
+        "num_classes": len(le.classes_),
+    }
+
+
+def _apply_feature_engineer_transform(X_new: pd.DataFrame, X_train_ref: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply the same feature engineering to val/test that was applied to train.
+
+    This re-runs the deterministic transforms (date encoding, status mapping, etc.)
+    and aligns columns to match X_train_ref. Frequency-based features are
+    re-computed per-split (acceptable for log-frequency features since they're
+    just used as rough signals, and this avoids complex fit/transform state).
+    """
+    X, _ = feature_engineer(X_new)
+
+    # Align columns: add missing cols as 0, drop extra cols
+    missing = set(X_train_ref.columns) - set(X.columns)
+    for col in missing:
+        X[col] = 0
+    X = X[X_train_ref.columns]
+    return X
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6.  UTILITIES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def encode_target(y):
+    """Convenience: LabelEncoder fit_transform."""
+    le = LabelEncoder()
+    return le.fit_transform(y), le
