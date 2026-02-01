@@ -1,0 +1,15 @@
+matplotlib
+numpy 
+pandas
+scikit-learn
+scipy
+seaborn
+torch>=2.0.0
+jupyter
+ipykernel
+tqdm
+# Deep Tabular Models
+pytorch-tabnet
+tab-transformer-pytorch
+# You can also use this module:
+#pytorch_tabular

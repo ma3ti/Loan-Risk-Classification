@@ -392,6 +392,8 @@ def train_model(
     save_name: str = "best_model.pkl",
     model_type: str = "standard",  # "standard" or "tab_transformer"
     max_grad_norm: Optional[float] = None,  # gradient clipping (e.g. 1.0)
+    use_cosine_scheduler: bool = False,  # True = CosineAnnealingLR instead of ReduceLROnPlateau
+    warmup_epochs: int = 0,  # linear warmup before main scheduler
 ):
     """
     Train a PyTorch model with early stopping and LR scheduling.
@@ -402,6 +404,10 @@ def train_model(
                  "tab_transformer" – model(x_cat, x_num) -> logits
     class_weights : array of per-class weights, or None.
     max_grad_norm : if set, clip gradient norms to this value each step.
+    use_cosine_scheduler : if True, use CosineAnnealingLR (smooth decay over
+                           num_epochs). Otherwise use ReduceLROnPlateau.
+    warmup_epochs : linearly ramp LR from ~0 to learning_rate over this
+                    many epochs before handing off to the main scheduler.
 
     Returns
     -------
@@ -414,13 +420,27 @@ def train_model(
     else:
         criterion = nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=scheduler_factor,
-        patience=scheduler_patience, min_lr=1e-6,
-    )
+
+    # Scheduler
+    if use_cosine_scheduler:
+        main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=num_epochs - warmup_epochs, eta_min=1e-6
+        )
+    else:
+        main_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=scheduler_factor,
+            patience=scheduler_patience, min_lr=1e-6,
+        )
+
+    # Optional warmup: linearly increase LR over warmup_epochs
+    if warmup_epochs > 0:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.01, end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
 
     # Select epoch runner
     run_epoch = (
@@ -439,7 +459,14 @@ def train_model(
 
         train_losses.append(t_loss)
         val_losses.append(v_loss)
-        scheduler.step(v_loss)
+
+        # Step scheduler
+        if ep <= warmup_epochs and warmup_epochs > 0:
+            warmup_scheduler.step()
+        elif use_cosine_scheduler:
+            main_scheduler.step()
+        else:
+            main_scheduler.step(v_loss)
 
         if v_loss < best_val_loss:
             best_val_loss = v_loss
