@@ -10,44 +10,45 @@
 
 # KNN
 
-  Best Params: {'classifier__n_neighbors': 30, 'classifier__p': 2, 'classifier__weights': 'distance', 'pca__n_components': 40, 'scaler__scaler_op': StandardScaler()}
+ Best Params: {'classifier__n_neighbors': 20, 'classifier__p': 2, 'classifier__weights': 'distance', 'pca__n_components': 30, 'scaler__scaler_op': StandardScaler()}
 
-  accuracy                 : 0.4184 ± 0.0029
-  balanced_accuracy        : 0.3118 ± 0.0026
-  f1_weighted              : 0.3969 ± 0.0026
-  f1_macro                 : 0.3212 ± 0.0028
+  accuracy                 : 0.4110 ± 0.0018
+  balanced_accuracy        : 0.3117 ± 0.0024
+  f1_weighted              : 0.3937 ± 0.0020
+  f1_macro                 : 0.3226 ± 0.0028
 
 
 # SVM
 
   Best Params: {'classifier__C': 100, 'classifier__gamma': 'scale', 'classifier__kernel': 'rbf', 'scaler__scaler_op': StandardScaler()}
 
-  accuracy                 : 0.6404 ± 0.0047
-  balanced_accuracy        : 0.5974 ± 0.0082
-  f1_weighted              : 0.6370 ± 0.0040
-  f1_macro                 : 0.6008 ± 0.0071
+  accuracy                 : 0.6356 ± 0.0089
+  balanced_accuracy        : 0.5913 ± 0.0082
+  f1_weighted              : 0.6319 ± 0.0083
+  f1_macro                 : 0.5970 ± 0.0079
 
 
 # FFNN
 
-  Accuracy          : 0.9086
-  Balanced Accuracy : 0.8704
-  F1 (weighted)     : 0.9090
-  F1 (macro)        : 0.8629
+  Accuracy          : 0.9237
+  Balanced Accuracy : 0.8889
+  F1 (weighted)     : 0.9238
+  F1 (macro)        : 0.8841
 
               precision    recall  f1-score   support
 
-     Grade A       0.92      0.98      0.95      2654
-     Grade B       0.96      0.91      0.94      3774
-     Grade C       0.94      0.95      0.94      3708
-     Grade D       0.92      0.90      0.91      2126
-     Grade E       0.83      0.83      0.83      1208
-     Grade F       0.69      0.69      0.69       753
-     Grade G       0.73      0.85      0.78       608
+     Grade A       0.94      0.97      0.96      2654
+     Grade B       0.96      0.93      0.94      3774
+     Grade C       0.95      0.95      0.95      3708
+     Grade D       0.94      0.92      0.93      2126
+     Grade E       0.88      0.87      0.87      1208
+     Grade F       0.76      0.71      0.74       753
+     Grade G       0.74      0.86      0.80       608
 
-    accuracy                           0.91     14831
-   macro avg       0.86      0.87      0.86     14831
-weighted avg       0.91      0.91      0.91     14831
+    accuracy                           0.92     14831
+   macro avg       0.88      0.89      0.88     14831
+weighted avg       0.92      0.92      0.92     14831
+
 
 
 # TABNET

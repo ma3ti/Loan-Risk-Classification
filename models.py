@@ -19,6 +19,7 @@ Public API:
 import os
 from typing import Dict, List, Optional, Tuple
 
+import pickle
 import numpy as np
 import torch
 import torch.nn as nn
@@ -85,8 +86,7 @@ class TabularDataset(Dataset):
         self.x_num = torch.FloatTensor(X[:, :n_num])
         # Categoricals: ensure non-negative integers
         cat_raw = X[:, n_num:]
-        cat_raw = cat_raw + 1  # Shift: -1 becomes 0 (index for unknown), 0 becomes 1, etc.
-        cat_raw = np.clip(cat_raw, 0, None) # Safety clip just in case
+        #cat_raw = cat_raw + 1  # Shift: -1 becomes 0 (index for unknown), 0 becomes 1, etc.
         self.x_cat = torch.LongTensor(cat_raw.astype(np.int64))
         self.y = torch.LongTensor(y)
         self.num_features = X.shape[1]
@@ -168,7 +168,6 @@ class LoanClassifierFFNN(nn.Module):
         x = self.drop3(F.leaky_relu(self.ln3(self.fc3(x))))
         x = self.drop4(F.leaky_relu(self.ln4(self.fc4(x))))
         return self.out(x)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3.  TABNET BUILDER
@@ -432,7 +431,7 @@ def train_model(
     num_epochs: int = 300,
     patience: int = 25,
     learning_rate: float = 3e-4,
-    weight_decay: float = 1e-2,
+    weight_decay: float = 1e-4,
     scheduler_patience: int = 5,
     scheduler_factor: float = 0.3,
     class_weights: Optional[np.ndarray] = None,
@@ -440,8 +439,8 @@ def train_model(
     save_name: str = "best_model.pkl",
     model_type: str = "standard",  # "standard" or "tab_transformer"
     max_grad_norm: Optional[float] = None,  # gradient clipping (e.g. 1.0)
-    use_cosine_scheduler: bool = False,  # True = CosineAnnealingLR instead of ReduceLROnPlateau
-    warmup_epochs: int = 0,  # linear warmup before main scheduler
+    use_cosine_scheduler: bool = False,  # True = CosineAnnealingLR
+    warmup_epochs: int = 0,  # linear warmup
 ):
     """
     Train a PyTorch model with early stopping and LR scheduling.
@@ -461,18 +460,18 @@ def train_model(
     -------
     model, train_losses, val_losses
     """
-    # Criterion
+    # 1. Setup Criterion
     if class_weights is not None:
         w = torch.tensor(class_weights, dtype=torch.float32).to(device)
         criterion = nn.CrossEntropyLoss(weight=w)
     else:
         criterion = nn.CrossEntropyLoss()
 
+    # 2. Setup Optimizer & Scheduler
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
     )
 
-    # Scheduler
     if use_cosine_scheduler:
         main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=num_epochs - warmup_epochs, eta_min=1e-6
@@ -483,14 +482,13 @@ def train_model(
             patience=scheduler_patience, min_lr=1e-6,
         )
 
-    # Optional warmup: linearly increase LR over warmup_epochs
     if warmup_epochs > 0:
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer, start_factor=0.01, end_factor=1.0,
             total_iters=warmup_epochs,
         )
 
-    # Select epoch runner
+    # 3. Helper to run one epoch
     run_epoch = (
         _run_epoch_tab_transformer if model_type == "tab_transformer"
         else _run_epoch_standard
@@ -501,6 +499,7 @@ def train_model(
     train_losses, val_losses = [], []
     save_path = os.path.join(MODEL_DIR, save_name)
 
+    # 4. Training Loop
     for ep in range(1, num_epochs + 1):
         t_loss = run_epoch(model, train_loader, criterion, optimizer, device, is_train=True, max_grad_norm=max_grad_norm)
         v_loss = run_epoch(model, val_loader, criterion, None, device, is_train=False)
@@ -508,7 +507,7 @@ def train_model(
         train_losses.append(t_loss)
         val_losses.append(v_loss)
 
-        # Step scheduler
+        # Scheduler Step
         if ep <= warmup_epochs and warmup_epochs > 0:
             warmup_scheduler.step()
         elif use_cosine_scheduler:
@@ -516,10 +515,22 @@ def train_model(
         else:
             main_scheduler.step(v_loss)
 
+        # 5. Save Logic (The important part!)
         if v_loss < best_val_loss:
             best_val_loss = v_loss
             counter = 0
-            torch.save(model.state_dict(), save_path)
+            
+            # --- CRITICAL STEP FOR PICKLE ---
+            # 1. Move model to CPU (so pickle is portable)
+            model.cpu()
+            
+            # 2. Pickle the object
+            with open(save_path, "wb") as f:
+                pickle.dump(model, f)
+            
+            # 3. Move back to Device (to continue training loop)
+            model.to(device)
+            
         else:
             counter += 1
 
@@ -535,8 +546,10 @@ def train_model(
             print(f"Early stopping at epoch {ep}")
             break
 
-    # Load best weights
-    model.load_state_dict(torch.load(save_path, weights_only=True))
+    # 6. Load Best Model (using Standard Pickle)
+    with open(save_path, "rb") as f:
+        model = pickle.load(f)
+    
     model.to(device)
     print(f"Loaded best model (val loss = {best_val_loss:.4f}) from {save_path}")
 
