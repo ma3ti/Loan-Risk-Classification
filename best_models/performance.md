@@ -1,11 +1,11 @@
-# RANDOM FOREST
-
+# Random Forest
   Best Params: {'classifier__max_depth': None, 'classifier__max_features': 0.3, 'classifier__min_samples_leaf': 1, 'classifier__min_samples_split': 8, 'classifier__n_estimators': 500}
 
-  accuracy                 : 0.9652 ± 0.0005
-  balanced_accuracy        : 0.9550 ± 0.0008
-  f1_weighted              : 0.9652 ± 0.0005
-  f1_macro                 : 0.9568 ± 0.0008
+  accuracy                 : 0.9655 ± 0.0007
+  balanced_accuracy        : 0.9554 ± 0.0010
+  f1_weighted              : 0.9655 ± 0.0007
+  f1_macro                 : 0.9571 ± 0.0010
+
 
 
 # KNN
