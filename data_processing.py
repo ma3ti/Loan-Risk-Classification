@@ -171,7 +171,7 @@ class LoanTitleProcessor(BaseEstimator, TransformerMixin):
 
 def feature_engineer(X: pd.DataFrame, y=None):
     """
-    Apply ALL feature-engineering steps from the notebook.
+    Apply feature-engineering step on selected features.
 
     Parameters
     ----------
@@ -189,9 +189,36 @@ def feature_engineer(X: pd.DataFrame, y=None):
 
     # ── 2a. Drop cols with > 50 % missing ────────────────────────────
     miss = X.isna().mean()
-    drop_high_miss = miss[miss > 0.50].index.tolist()
+    drop_high_miss = miss[miss > 0.80].index.tolist()
     X.drop(columns=drop_high_miss, inplace=True, errors="ignore")
-    print(f"Dropped {len(drop_high_miss)} cols with >50% missing")
+    print(f"Dropped {len(drop_high_miss)} cols with >80% missing")
+
+    # ── 2a2. Drop next_payment_date (operational, not predictive) ────
+    if "next_payment_date" in X.columns:
+        X.drop(columns=["next_payment_date"], inplace=True)
+        print("Dropped next_payment_date (operational column)")
+
+    # ── 2a3. Handle "months_since_*" columns ─────────────────────────
+    # These have meaningful missingness: missing = "never happened" (good credit).
+    # Create binary flag + impute with -1 to preserve this signal.
+    months_since_cols = [c for c in X.columns if c.startswith("months_since")]
+    for col in months_since_cols:
+        if col in X.columns:
+            X[f"{col}_ever"] = X[col].notna().astype("float64")
+            X[col] = X[col].fillna(-1)
+    if months_since_cols:
+        print(f"Processed {len(months_since_cols)} 'months_since_*' cols (added _ever flags, imputed -1)")
+
+    # ── 2a4. Impute remaining categorical cols with "missing" ────────
+    # This ensures categoricals with moderate missingness get a proper
+    # category instead of causing issues downstream.
+    cat_cols_early = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    for col in cat_cols_early:
+        if X[col].isna().any():
+            X[col] = X[col].fillna("missing")
+    if cat_cols_early:
+        n_imputed = sum(1 for c in cat_cols_early if "missing" in X[c].values)
+        print(f"Imputed 'missing' category in {n_imputed} categorical cols")
 
     # ── 2b. Drop collinear (r > 0.95) ────────────────────────────────
     num_df = X.select_dtypes(include=[np.number])

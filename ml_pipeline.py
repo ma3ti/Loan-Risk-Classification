@@ -64,7 +64,7 @@ def print_grid_results(gs: GridSearchCV, name: str) -> None:
     print()
 
 
-def plot_rf_feature_importances(gs: GridSearchCV, top_k: int = 20):
+def plot_rf_feature_importances(gs: GridSearchCV, top_k: int = 20, save_path: str = None):
     """
     Plot top-k feature importances from the best Random Forest estimator.
 
@@ -73,6 +73,7 @@ def plot_rf_feature_importances(gs: GridSearchCV, top_k: int = 20):
     gs    : fitted GridSearchCV whose best_estimator_ is a Pipeline
             containing steps named 'preprocessor' and 'classifier'.
     top_k : how many features to show.
+    save_path : if set, save the figure to this path.
     """
     import matplotlib.pyplot as plt
 
@@ -99,6 +100,9 @@ def plot_rf_feature_importances(gs: GridSearchCV, top_k: int = 20):
     plt.title(f"Random Forest — Top {top_k} Feature Importances")
     plt.xlabel("Importance (Gini)")
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {save_path}")
     plt.show()
 
 

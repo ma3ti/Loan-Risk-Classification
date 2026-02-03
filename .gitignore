@@ -1,2 +1,4 @@
 *.pkl
 ./models/
+./best_models/
+__pycache__/

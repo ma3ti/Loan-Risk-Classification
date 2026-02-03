@@ -5,13 +5,15 @@ All DL model definitions, datasets, training loops, and evaluation utilities.
 
 Public API:
     LoanDataset                   – PyTorch Dataset for tabular data
-    TabularDataset                – PyTorch Dataset that splits num/cat (for TabTransformer)
+    TabularDataset                – PyTorch Dataset that splits num/cat (for TabTransformer/FTTransformer)
     LoanClassifierFFNN            – Feed-forward neural network
     build_tabnet_classifier(...)  – Configure & return TabNetClassifier
     build_tab_transformer(...)    – Configure & return TabTransformer from library
+    build_ft_transformer(...)     – Configure & return FTTransformer (attention on ALL features)
     train_model(...)              – Generic training loop with early stopping
     evaluate_model(...)           – Compute metrics on a loader
     plot_losses(...)              – Plot training vs validation loss
+    plot_feature_importances(...) – Plot feature importances with actual names
 """
 
 import os
@@ -318,7 +320,52 @@ def build_tab_transformer(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5.  GENERIC TRAINING LOOP (for FFNN & TabTransformer)
+# 4b. FT-TRANSFORMER BUILDER (attention over ALL features)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_ft_transformer(
+    cat_cardinalities: Tuple[int, ...],
+    num_continuous: int,
+    num_classes: int = 7,
+    # Architecture
+    dim: int = 64,
+    depth: int = 4,
+    heads: int = 8,
+    attn_dropout: float = 0.1,
+    ff_dropout: float = 0.1,
+    device: torch.device = DEVICE,
+):
+    """
+    Build an FTTransformer (Feature Tokenizer Transformer) using the
+    `tab_transformer_pytorch` library.
+
+    Unlike TabTransformer, FTTransformer tokenizes ALL features (numerical
+    AND categorical) into embeddings, then applies self-attention across
+    all of them.  This is much better suited for datasets with many
+    numerical features.
+
+    Same forward interface as TabTransformer: model(x_categ, x_numer) -> logits.
+
+    Returns the model moved to `device`.
+    """
+    from tab_transformer_pytorch import FTTransformer
+
+    model = FTTransformer(
+        categories=tuple(cat_cardinalities),
+        num_continuous=num_continuous,
+        dim=dim,
+        dim_out=num_classes,
+        depth=depth,
+        heads=heads,
+        attn_dropout=attn_dropout,
+        ff_dropout=ff_dropout,
+    ).to(device)
+
+    return model
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5.  GENERIC TRAINING LOOP (for FFNN, TabTransformer & FTTransformer)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _run_epoch_standard(model, loader, criterion, optimizer, device, is_train=True, max_grad_norm=None):
@@ -579,7 +626,7 @@ def evaluate_model(
 # 7.  PLOTTING
 # ══════════════════════════════════════════════════════════════════════════════
 
-def plot_losses(train_losses, val_losses, title="Training vs Validation Loss"):
+def plot_losses(train_losses, val_losses, title="Training vs Validation Loss", save_path=None):
     """Plot train/val loss curves."""
     import matplotlib.pyplot as plt
 
@@ -592,10 +639,13 @@ def plot_losses(train_losses, val_losses, title="Training vs Validation Loss"):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {save_path}")
     plt.show()
 
 
-def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Matrix"):
+def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Matrix", save_path=None):
     """Plot a confusion matrix heatmap."""
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -610,6 +660,9 @@ def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Mat
     plt.ylabel("True Label")
     plt.xlabel("Predicted Label")
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {save_path}")
     plt.show()
 
 
@@ -618,6 +671,7 @@ def plot_feature_importances(
     feature_names: list,
     top_k: int = 20,
     title: str = "Feature Importances",
+    save_path: str = None,
 ):
     """
     Plot top-k feature importances with actual feature names.
@@ -628,6 +682,7 @@ def plot_feature_importances(
     feature_names : list of feature name strings, same length as importances.
     top_k         : how many features to show.
     title         : plot title.
+    save_path     : if set, save the figure to this path.
     """
     import matplotlib.pyplot as plt
 
@@ -647,6 +702,9 @@ def plot_feature_importances(
     plt.title(f"{title} (top {top_k})")
     plt.xlabel("Importance")
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {save_path}")
     plt.show()
 
 
