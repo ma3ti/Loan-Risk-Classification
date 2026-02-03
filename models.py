@@ -85,7 +85,8 @@ class TabularDataset(Dataset):
         self.x_num = torch.FloatTensor(X[:, :n_num])
         # Categoricals: ensure non-negative integers
         cat_raw = X[:, n_num:]
-        cat_raw = np.clip(cat_raw, 0, None)  # map -1 (unknown) to 0
+        cat_raw = cat_raw + 1  # Shift: -1 becomes 0 (index for unknown), 0 becomes 1, etc.
+        cat_raw = np.clip(cat_raw, 0, None) # Safety clip just in case
         self.x_cat = torch.LongTensor(cat_raw.astype(np.int64))
         self.y = torch.LongTensor(y)
         self.num_features = X.shape[1]
@@ -431,7 +432,7 @@ def train_model(
     num_epochs: int = 300,
     patience: int = 25,
     learning_rate: float = 3e-4,
-    weight_decay: float = 1e-4,
+    weight_decay: float = 1e-2,
     scheduler_patience: int = 5,
     scheduler_factor: float = 0.3,
     class_weights: Optional[np.ndarray] = None,
