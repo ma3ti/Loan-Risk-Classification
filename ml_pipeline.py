@@ -30,6 +30,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 
 
 from config import MODEL_DIR, SCORING_METRICS, SEED
@@ -307,5 +308,63 @@ def train_svm(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=
     print("Starting SVM GridSearch...")
     gs.fit(X, y)
     print("SVM GridSearch complete.")
+    
+    return gs
+
+
+
+def train_lr(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=SEED) -> GridSearchCV:
+    """Train Logistic Regression with GridSearchCV.
+    
+    Parameters
+    ----------
+    X : feature DataFrame
+    y : target Series
+    feature_engineer : FeatureEngineer instance
+    preprocessor : preprocessor instance
+    param_grid : dict
+        GridSearchCV param grid. If None, use default.
+    cv : int
+        Number of CV folds.
+    seed : int
+        Random seed for reproducibility.    
+    
+    Returns
+    -------
+    GridSearchCV
+        Fitted GridSearchCV object.
+    """
+    
+    pipeline = Pipeline([
+        ("engineer", feature_engineer),
+        ("preprocessor", preprocessor),        
+        ("classifier", LogisticRegression(
+            class_weight="balanced",
+            random_state=seed,
+            max_iter=2000, 
+            n_jobs=-1    
+        ))
+    ])
+
+    if param_grid is None:
+        param_grid = {
+            "preprocessor__scaler": [StandardScaler(), RobustScaler(), MinMaxScaler()],
+            "classifier__C": [0.01, 0.1, 1, 10, 100],
+            "classifier__solver": ["lbfgs", "saga"],
+        }
+
+    gs = GridSearchCV(
+        pipeline, 
+        param_grid,
+        cv=cv,
+        scoring=SCORING_METRICS,
+        refit="f1_macro",
+        n_jobs=-1,
+        verbose=1
+    )
+
+    print("Starting Logistic Regression GridSearch...")
+    gs.fit(X, y)
+    print("Logistic Regression GridSearch complete.")
     
     return gs

@@ -43,7 +43,7 @@ def load_data(path: str = TRAIN_CSV) -> pd.DataFrame:
     return df
 
 
-# helpers used inside feature_engineer
+# helpers used inside feature_engineer classes
 _REGIONS = {
     "northeast": ["ct", "me", "ma", "nh", "ri", "vt", "nj", "ny", "pa"],
     "midwest": ["il", "in", "mi", "oh", "wi", "ia", "ks", "mn", "mo",
@@ -156,242 +156,242 @@ class LoanTitleProcessor(BaseEstimator, TransformerMixin):
         return X
 
 # Feature engineering function
-def feature_engineer(X: pd.DataFrame, y=None):
-    """
-    Apply ALL feature-engineering steps from the notebook.
+# def feature_engineer(X: pd.DataFrame, y=None):
+#     """
+#     Apply ALL feature-engineering steps from the notebook.
 
-    Parameters
-    ----------
-    X : DataFrame   –  raw features (grade already dropped)
-    y : array-like  –  target (unused here, kept for pipeline compat)
+#     Parameters
+#     ----------
+#     X : DataFrame   –  raw features (grade already dropped)
+#     y : array-like  –  target (unused here, kept for pipeline compat)
 
-    Returns
-    -------
-    X : DataFrame   –  engineered features
-    col_lists : dict with keys
-        "normal_dist", "safe_log_cols", "negative_cols",
-        "ordinal_cols", "one_hot_cols", "target_encode_cols"
-    """
-    X = X.copy()
+#     Returns
+#     -------
+#     X : DataFrame   –  engineered features
+#     col_lists : dict with keys
+#         "normal_dist", "safe_log_cols", "negative_cols",
+#         "ordinal_cols", "one_hot_cols", "target_encode_cols"
+#     """
+#     X = X.copy()
 
-    # Drop cols with > 80% missing
-    miss = X.isna().mean()
-    drop_high_miss = miss[miss > 0.80].index.tolist()
-    X.drop(columns=drop_high_miss, inplace=True, errors="ignore")
-    print(f"Dropped {len(drop_high_miss)} cols with >80% missing")
+#     # Drop cols with > 80% missing
+#     miss = X.isna().mean()
+#     drop_high_miss = miss[miss > 0.80].index.tolist()
+#     X.drop(columns=drop_high_miss, inplace=True, errors="ignore")
+#     print(f"Dropped {len(drop_high_miss)} cols with >80% missing")
 
-    # Drop next_payment_date feature (not useful for modeling)
-    if "next_payment_date" in X.columns:
-        X.drop(columns=["next_payment_date"], inplace=True)
-        print("Dropped next_payment_date (operational column)")
+#     # Drop next_payment_date feature (not useful for modeling)
+#     if "next_payment_date" in X.columns:
+#         X.drop(columns=["next_payment_date"], inplace=True)
+#         print("Dropped next_payment_date (operational column)")
 
-    # Handle specific "months_since_*" columns
-    # These cols have a meaningful missingness: missing = "never happened" (good credit).
-    # Create binary flag + impute with -1 to preserve this signal.
-    months_since_special = [
-        "months_since_last_delinquency",
-        "months_since_recent_revolving_delinquency",
-        "months_since_last_major_derog",
-        "months_since_recent_bankcard_delinquency",
-    ]
-    processed_months_since = []
-    for col in months_since_special:
-        if col in X.columns:
-            X[f"{col}_ever"] = X[col].notna().astype("float64")
-            X[col] = X[col].fillna(-1)
-            processed_months_since.append(col)
-    if processed_months_since:
-        print(f"Processed {len(processed_months_since)} 'months_since_*' cols (added _ever flags, imputed -1)")
+#     # Handle specific "months_since_*" columns
+#     # These cols have a meaningful missingness: missing = "never happened" (good credit).
+#     # Create binary flag + impute with -1 to preserve this signal.
+#     months_since_special = [
+#         "months_since_last_delinquency",
+#         "months_since_recent_revolving_delinquency",
+#         "months_since_last_major_derog",
+#         "months_since_recent_bankcard_delinquency",
+#     ]
+#     processed_months_since = []
+#     for col in months_since_special:
+#         if col in X.columns:
+#             X[f"{col}_ever"] = X[col].notna().astype("float64")
+#             X[col] = X[col].fillna(-1)
+#             processed_months_since.append(col)
+#     if processed_months_since:
+#         print(f"Processed {len(processed_months_since)} 'months_since_*' cols (added _ever flags, imputed -1)")
 
-    # Impute remaining categorical cols with "missing"
-    # This ensures categoricals with moderate missingness get a proper category instead of causing issues downstream.
-    cat_cols_early = X.select_dtypes(include=["object", "category"]).columns.tolist()
-    for col in cat_cols_early:
-        if X[col].isna().any():
-            X[col] = X[col].fillna("missing")
-    if cat_cols_early:
-        n_imputed = sum(1 for c in cat_cols_early if "missing" in X[c].values)
-        print(f"Imputed 'missing' category in {n_imputed} categorical cols")
+#     # Impute remaining categorical cols with "missing"
+#     # This ensures categoricals with moderate missingness get a proper category instead of causing issues downstream.
+#     cat_cols_early = X.select_dtypes(include=["object", "category"]).columns.tolist()
+#     for col in cat_cols_early:
+#         if X[col].isna().any():
+#             X[col] = X[col].fillna("missing")
+#     if cat_cols_early:
+#         n_imputed = sum(1 for c in cat_cols_early if "missing" in X[c].values)
+#         print(f"Imputed 'missing' category in {n_imputed} categorical cols")
 
-    # Drop collinear (r > 0.95) numeric columns
-    num_df = X.select_dtypes(include=[np.number])
-    corr = num_df.corr().abs()
-    upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
-    collinear_drop = [c for c in upper.columns if any(upper[c] > 0.95)]
-    X.drop(columns=collinear_drop, inplace=True, errors="ignore")
-    print(f"Dropped {len(collinear_drop)} collinear cols")
+#     # Drop collinear (r > 0.95) numeric columns
+#     num_df = X.select_dtypes(include=[np.number])
+#     corr = num_df.corr().abs()
+#     upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+#     collinear_drop = [c for c in upper.columns if any(upper[c] > 0.95)]
+#     X.drop(columns=collinear_drop, inplace=True, errors="ignore")
+#     print(f"Dropped {len(collinear_drop)} collinear cols")
 
-    # Convert hidden-numeric columns
-    if "loan_contract_term_months" in X.columns:
-        X["loan_contract_term_months"] = pd.to_numeric(
-            X["loan_contract_term_months"].str.replace(" months", ""),
-            errors="coerce",
-        )
-        mode_val = X["loan_contract_term_months"].mode()[0]
-        X["loan_contract_term_months"].fillna(mode_val, inplace=True)
+#     # Convert hidden-numeric columns
+#     if "loan_contract_term_months" in X.columns:
+#         X["loan_contract_term_months"] = pd.to_numeric(
+#             X["loan_contract_term_months"].str.replace(" months", ""),
+#             errors="coerce",
+#         )
+#         mode_val = X["loan_contract_term_months"].mode()[0]
+#         X["loan_contract_term_months"].fillna(mode_val, inplace=True)
 
-    if "borrower_profile_employment_length" in X.columns:
-        X["borrower_profile_employment_length"] = (
-            X["borrower_profile_employment_length"]
-            .replace({"< 1 year": "0 years", "10+ years": "10 years"})
-        )
-        X["borrower_profile_employment_length"] = (
-            X["borrower_profile_employment_length"]
-            .str.extract(r"(\d+)").astype(float)
-        )
-        med = X["borrower_profile_employment_length"].median()
-        X["borrower_profile_employment_length"].fillna(med, inplace=True)
+#     if "borrower_profile_employment_length" in X.columns:
+#         X["borrower_profile_employment_length"] = (
+#             X["borrower_profile_employment_length"]
+#             .replace({"< 1 year": "0 years", "10+ years": "10 years"})
+#         )
+#         X["borrower_profile_employment_length"] = (
+#             X["borrower_profile_employment_length"]
+#             .str.extract(r"(\d+)").astype(float)
+#         )
+#         med = X["borrower_profile_employment_length"].median()
+#         X["borrower_profile_employment_length"].fillna(med, inplace=True)
 
-    # Cyclical date encoding + derived features
-    date_cols = [
-        "loan_issue_date",
-        "credit_history_earliest_line",
-        "last_payment_date",
-        "last_credit_pull_date",
-    ]
-    for col in date_cols:
-        if col in X.columns:
-            X[col] = pd.to_datetime(X[col], format="%b-%Y", errors="coerce")
+#     # Cyclical date encoding + derived features
+#     date_cols = [
+#         "loan_issue_date",
+#         "credit_history_earliest_line",
+#         "last_payment_date",
+#         "last_credit_pull_date",
+#     ]
+#     for col in date_cols:
+#         if col in X.columns:
+#             X[col] = pd.to_datetime(X[col], format="%b-%Y", errors="coerce")
 
-    if {"loan_issue_date", "credit_history_earliest_line"}.issubset(X.columns):
-        X["credit_history_length_months"] = (
-            (X["loan_issue_date"] - X["credit_history_earliest_line"]).dt.days / 30
-        )
+#     if {"loan_issue_date", "credit_history_earliest_line"}.issubset(X.columns):
+#         X["credit_history_length_months"] = (
+#             (X["loan_issue_date"] - X["credit_history_earliest_line"]).dt.days / 30
+#         )
 
-    ref_date = pd.Timestamp("2020-01-01")
-    for col in date_cols:
-        if col in X.columns:
-            X[f"{col}_year"] = X[col].dt.year
-            month = X[col].dt.month
-            X[f"{col}_month_sin"] = np.sin(2 * np.pi * month / 12)
-            X[f"{col}_month_cos"] = np.cos(2 * np.pi * month / 12)
-            X[f"{col}_quarter"] = X[col].dt.quarter
-            X[f"{col}_days_since_ref"] = (X[col] - ref_date).dt.days
-            X.drop(columns=[col], inplace=True)
+#     ref_date = pd.Timestamp("2020-01-01")
+#     for col in date_cols:
+#         if col in X.columns:
+#             X[f"{col}_year"] = X[col].dt.year
+#             month = X[col].dt.month
+#             X[f"{col}_month_sin"] = np.sin(2 * np.pi * month / 12)
+#             X[f"{col}_month_cos"] = np.cos(2 * np.pi * month / 12)
+#             X[f"{col}_quarter"] = X[col].dt.quarter
+#             X[f"{col}_days_since_ref"] = (X[col] - ref_date).dt.days
+#             X.drop(columns=[col], inplace=True)
 
-    # Categorical analysis
-    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
-    ordinal_cols = []
-    one_hot_cols = []
-    target_encode_cols = []
+#     # Categorical analysis
+#     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+#     ordinal_cols = []
+#     one_hot_cols = []
+#     target_encode_cols = []
 
-    for col in cat_cols:
-        n = X[col].nunique()
-        if n == 2:
-            ordinal_cols.append(col)
-        elif n <= 51:
-            one_hot_cols.append(col)
+#     for col in cat_cols:
+#         n = X[col].nunique()
+#         if n == 2:
+#             ordinal_cols.append(col)
+#         elif n <= 51:
+#             one_hot_cols.append(col)
 
-    # borrower_housing_ownership_status
-    if "borrower_housing_ownership_status" in X.columns:
-        X["borrower_housing_ownership_status"] = (
-            X["borrower_housing_ownership_status"]
-            .replace({"none": "other", "any": "other"})
-            .fillna("other")
-        )
+#     # borrower_housing_ownership_status
+#     if "borrower_housing_ownership_status" in X.columns:
+#         X["borrower_housing_ownership_status"] = (
+#             X["borrower_housing_ownership_status"]
+#             .replace({"none": "other", "any": "other"})
+#             .fillna("other")
+#         )
 
-    # borrower_income_verification_status
-    if "borrower_income_verification_status" in X.columns:
-        X["borrower_income_verification_status"].fillna(
-            "not verified", inplace=True
-        )
+#     # borrower_income_verification_status
+#     if "borrower_income_verification_status" in X.columns:
+#         X["borrower_income_verification_status"].fillna(
+#             "not verified", inplace=True
+#         )
 
-    # loan_status_current_code  (ordinal mapping)
-    if "loan_status_current_code" in X.columns:
-        X["loan_status_current_code"] = (
-            X["loan_status_current_code"].replace(_STATUS_MAP)
-        )
-        X["loan_status_current_code"] = (
-            X["loan_status_current_code"].map(_RISK_ORDER)
-        )
-        med_status = X["loan_status_current_code"].median()
-        X["loan_status_current_code"].fillna(med_status, inplace=True)
-        if "loan_status_current_code" in one_hot_cols:
-            one_hot_cols.remove("loan_status_current_code")
+#     # loan_status_current_code  (ordinal mapping)
+#     if "loan_status_current_code" in X.columns:
+#         X["loan_status_current_code"] = (
+#             X["loan_status_current_code"].replace(_STATUS_MAP)
+#         )
+#         X["loan_status_current_code"] = (
+#             X["loan_status_current_code"].map(_RISK_ORDER)
+#         )
+#         med_status = X["loan_status_current_code"].median()
+#         X["loan_status_current_code"].fillna(med_status, inplace=True)
+#         if "loan_status_current_code" in one_hot_cols:
+#             one_hot_cols.remove("loan_status_current_code")
 
-    # borrower_address_state -> region features
-    if "borrower_address_state" in X.columns:
-        X["borrower_address_state"].fillna("unknown", inplace=True)
-        X["state_region"] = X["borrower_address_state"].apply(_get_state_region)
-        X["state_no_income_tax"] = (
-            X["borrower_address_state"]
-            .str.lower()
-            .isin(_NO_INCOME_TAX_STATES)
-            .astype("float64")
-        )
-        state_counts = X["borrower_address_state"].value_counts()
-        X["state_log_frequency"] = np.log1p(
-            X["borrower_address_state"].map(state_counts)
-        )
-        target_encode_cols.append("borrower_address_state")
-        if "borrower_address_state" in one_hot_cols:
-            one_hot_cols.remove("borrower_address_state")
-        one_hot_cols.append("state_region")
+#     # borrower_address_state -> region features
+#     if "borrower_address_state" in X.columns:
+#         X["borrower_address_state"].fillna("unknown", inplace=True)
+#         X["state_region"] = X["borrower_address_state"].apply(_get_state_region)
+#         X["state_no_income_tax"] = (
+#             X["borrower_address_state"]
+#             .str.lower()
+#             .isin(_NO_INCOME_TAX_STATES)
+#             .astype("float64")
+#         )
+#         state_counts = X["borrower_address_state"].value_counts()
+#         X["state_log_frequency"] = np.log1p(
+#             X["borrower_address_state"].map(state_counts)
+#         )
+#         target_encode_cols.append("borrower_address_state")
+#         if "borrower_address_state" in one_hot_cols:
+#             one_hot_cols.remove("borrower_address_state")
+#         one_hot_cols.append("state_region")
 
-    # borrower_address_zip -> region + frequency
-    if "borrower_address_zip" in X.columns:
-        X["borrower_address_zip"].fillna("unknown", inplace=True)
-        X["zip3_prefix"] = X["borrower_address_zip"].str[:3]
-        X["zip_region"] = X["borrower_address_zip"].apply(_get_zip_region)
-        zip_counts = X["zip3_prefix"].value_counts()
-        X["zip_log_frequency"] = np.log1p(X["zip3_prefix"].map(zip_counts))
-        X.drop(columns=["borrower_address_zip"], inplace=True)
-        one_hot_cols.append("zip_region")
-        target_encode_cols.append("zip3_prefix")
+#     # borrower_address_zip -> region + frequency
+#     if "borrower_address_zip" in X.columns:
+#         X["borrower_address_zip"].fillna("unknown", inplace=True)
+#         X["zip3_prefix"] = X["borrower_address_zip"].str[:3]
+#         X["zip_region"] = X["borrower_address_zip"].apply(_get_zip_region)
+#         zip_counts = X["zip3_prefix"].value_counts()
+#         X["zip_log_frequency"] = np.log1p(X["zip3_prefix"].map(zip_counts))
+#         X.drop(columns=["borrower_address_zip"], inplace=True)
+#         one_hot_cols.append("zip_region")
+#         target_encode_cols.append("zip3_prefix")
 
-    # loan_title processing
-    if "loan_title" in X.columns:
-        proc = LoanTitleProcessor()
-        proc.fit(X)
-        X = proc.transform(X)
-        # loan_category goes to one-hot
-        one_hot_cols.append("loan_category")
+#     # loan_title processing
+#     if "loan_title" in X.columns:
+#         proc = LoanTitleProcessor()
+#         proc.fit(X)
+#         X = proc.transform(X)
+#         # loan_category goes to one-hot
+#         one_hot_cols.append("loan_category")
 
-    # Drop loan_purpose_category
-    if "loan_purpose_category" in X.columns:
-        X.drop(columns=["loan_purpose_category"], inplace=True)
-        if "loan_purpose_category" in one_hot_cols:
-            one_hot_cols.remove("loan_purpose_category")
+#     # Drop loan_purpose_category
+#     if "loan_purpose_category" in X.columns:
+#         X.drop(columns=["loan_purpose_category"], inplace=True)
+#         if "loan_purpose_category" in one_hot_cols:
+#             one_hot_cols.remove("loan_purpose_category")
 
-    # Convert remaining Int64 -> float64
-    int_cols = X.select_dtypes(include=["int64"]).columns.tolist()
-    X[int_cols] = X[int_cols].astype("float64")
+#     # Convert remaining Int64 -> float64
+#     int_cols = X.select_dtypes(include=["int64"]).columns.tolist()
+#     X[int_cols] = X[int_cols].astype("float64")
 
-    # Skewness analysis on numeric cols
-    numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
-    skewness = X[numeric_cols].apply(lambda c: c.skew())
-    highly_skewed = skewness[skewness.abs() > 1].index.tolist()
-    normal_dist = skewness[skewness.abs() <= 1].index.tolist()
-    negative_cols = [c for c in highly_skewed if (X[c] < 0).any()]
-    safe_log_cols = [c for c in highly_skewed if c not in negative_cols]
+#     # Skewness analysis on numeric cols
+#     numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+#     skewness = X[numeric_cols].apply(lambda c: c.skew())
+#     highly_skewed = skewness[skewness.abs() > 1].index.tolist()
+#     normal_dist = skewness[skewness.abs() <= 1].index.tolist()
+#     negative_cols = [c for c in highly_skewed if (X[c] < 0).any()]
+#     safe_log_cols = [c for c in highly_skewed if c not in negative_cols]
 
-    # Clean up column lists (ensure they still exist)
-    existing = set(X.columns)
-    ordinal_cols = [c for c in ordinal_cols if c in existing]
-    one_hot_cols = [c for c in one_hot_cols if c in existing]
-    target_encode_cols = [c for c in target_encode_cols if c in existing]
-    normal_dist = [c for c in normal_dist if c in existing]
-    safe_log_cols = [c for c in safe_log_cols if c in existing]
-    negative_cols = [c for c in negative_cols if c in existing]
+#     # Clean up column lists (ensure they still exist)
+#     existing = set(X.columns)
+#     ordinal_cols = [c for c in ordinal_cols if c in existing]
+#     one_hot_cols = [c for c in one_hot_cols if c in existing]
+#     target_encode_cols = [c for c in target_encode_cols if c in existing]
+#     normal_dist = [c for c in normal_dist if c in existing]
+#     safe_log_cols = [c for c in safe_log_cols if c in existing]
+#     negative_cols = [c for c in negative_cols if c in existing]
 
-    col_lists = {
-        "normal_dist": normal_dist,
-        "safe_log_cols": safe_log_cols,
-        "negative_cols": negative_cols,
-        "ordinal_cols": ordinal_cols,
-        "one_hot_cols": one_hot_cols,
-        "target_encode_cols": target_encode_cols,
-    }
+#     col_lists = {
+#         "normal_dist": normal_dist,
+#         "safe_log_cols": safe_log_cols,
+#         "negative_cols": negative_cols,
+#         "ordinal_cols": ordinal_cols,
+#         "one_hot_cols": one_hot_cols,
+#         "target_encode_cols": target_encode_cols,
+#     }
 
-    print(f"Feature engineering done  ->  {X.shape[1]} features")
-    print(f"  normal_dist      : {len(normal_dist)}")
-    print(f"  safe_log_cols    : {len(safe_log_cols)}")
-    print(f"  negative_cols    : {len(negative_cols)}")
-    print(f"  ordinal_cols     : {len(ordinal_cols)}")
-    print(f"  one_hot_cols     : {len(one_hot_cols)}")
-    print(f"  target_encode_cols: {len(target_encode_cols)}")
+#     print(f"Feature engineering done  ->  {X.shape[1]} features")
+#     print(f"  normal_dist      : {len(normal_dist)}")
+#     print(f"  safe_log_cols    : {len(safe_log_cols)}")
+#     print(f"  negative_cols    : {len(negative_cols)}")
+#     print(f"  ordinal_cols     : {len(ordinal_cols)}")
+#     print(f"  one_hot_cols     : {len(one_hot_cols)}")
+#     print(f"  target_encode_cols: {len(target_encode_cols)}")
 
-    return X, col_lists
+#     return X, col_lists
 
 
 # ML preprocessor for RF, KNN and SVM models

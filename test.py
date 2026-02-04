@@ -2,7 +2,7 @@
 test.py
 -------
 Inference Module.
-Supports: 'rf', 'knn', 'svm', 'ffnn', 'tabnet', 'tabtransformer'.
+Supports: 'lr','rf', 'knn', 'svm', 'ffnn', 'tabnet', 'tabtransformer'.
 """
 
 import pickle
@@ -23,12 +23,12 @@ def getName():
     return "Matteo Fontana"
 
 
-def preprocess(dataset: pd.DataFrame, clfName: str = 'rf'):
+def preprocess(dataset: pd.DataFrame, clfName: str):
     """
     Loads the appropriate preprocessor and transforms the data.
     
     Mapping:
-      - 'rf', 'knn', 'svm' -> load models/{clfName}_preprocessor.pkl
+      - 'lr', 'rf', 'knn', 'svm' -> load models/{clfName}_preprocessor.pkl
       - 'ffnn', 'tabnet', 'tabtransformer' -> load models/ffnn_preprocessor.pkl
     """
     # Drop target if present
@@ -37,7 +37,7 @@ def preprocess(dataset: pd.DataFrame, clfName: str = 'rf'):
     
     # Resolve Preprocessor Path
     # Deep Learning models share the same preprocessor pipeline
-    dl_models = ['ffnn', 'tabnet', 'tabtransformer']
+    #dl_models = ['ffnn', 'tabnet', 'tabtransformer']
     
     # if clfName in dl_models:
     #     path = "models/ffnn_preprocessor.pkl"
@@ -56,7 +56,7 @@ def preprocess(dataset: pd.DataFrame, clfName: str = 'rf'):
     return X_processed
 
 
-def load(clfName: str = 'rf'):
+def load(clfName: str):
     """
     Loads {clfName}_classifier.pkl.
     """
