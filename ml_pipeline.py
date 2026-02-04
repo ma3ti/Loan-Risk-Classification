@@ -106,18 +106,9 @@ def plot_rf_feature_importances(gs: GridSearchCV, top_k: int = 20, save_path: st
     plt.show()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# RANDOM FOREST
-# ══════════════════════════════════════════════════════════════════════════════
 
-def train_random_forest(
-    X,
-    y,
-    preprocessor,
-    param_grid: Optional[dict] = None,
-    cv: int = 3,
-    seed: int = SEED,
-) -> GridSearchCV:
+# RANDOM FOREST
+def train_random_forest(X, y, preprocessor, param_grid: Optional[dict] = None, cv: int = 3, seed: int = SEED) -> GridSearchCV:
     """
     Train Random Forest with GridSearchCV.
 

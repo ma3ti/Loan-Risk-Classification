@@ -2,3 +2,5 @@
 ./models/
 ./best_models/
 __pycache__/
+*.zip
+test.py

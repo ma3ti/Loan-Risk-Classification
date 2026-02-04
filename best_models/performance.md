@@ -53,20 +53,20 @@ weighted avg       0.92      0.92      0.92     14831
 
 # TABNET
 
-  Accuracy          : 0.9284
-  Balanced Accuracy : 0.9016
-  F1 (weighted)     : 0.9282
-  F1 (macro)        : 0.9000
+  Accuracy          : 0.9305
+  Balanced Accuracy : 0.9011
+  F1 (weighted)     : 0.9306
+  F1 (macro)        : 0.9006
 
               precision    recall  f1-score   support
 
-     Grade A       0.94      0.98      0.96      2654
-     Grade B       0.97      0.92      0.94      3774
-     Grade C       0.94      0.96      0.95      3708
-     Grade D       0.92      0.93      0.93      2126
-     Grade E       0.90      0.88      0.89      1208
-     Grade F       0.82      0.76      0.79       753
-     Grade G       0.81      0.88      0.85       608
+     Grade A       0.98      0.94      0.96      2654
+     Grade B       0.94      0.95      0.95      3774
+     Grade C       0.94      0.95      0.95      3708
+     Grade D       0.94      0.93      0.94      2126
+     Grade E       0.89      0.91      0.90      1208
+     Grade F       0.80      0.79      0.80       753
+     Grade G       0.81      0.83      0.82       608
 
     accuracy                           0.93     14831
    macro avg       0.90      0.90      0.90     14831
@@ -74,23 +74,23 @@ weighted avg       0.93      0.93      0.93     14831
 
 
 
-
 #  TabTransformer Test Set Evaluation
-  Accuracy          : 0.8602
-  Balanced Accuracy : 0.8036
-  F1 (weighted)     : 0.8609
-  F1 (macro)        : 0.7912
+
+  Accuracy          : 0.8801
+  Balanced Accuracy : 0.8202
+  F1 (weighted)     : 0.8805
+  F1 (macro)        : 0.8164
 
               precision    recall  f1-score   support
 
-     Grade A       0.94      0.93      0.94      2654
-     Grade B       0.91      0.91      0.91      3774
-     Grade C       0.92      0.89      0.90      3708
-     Grade D       0.84      0.85      0.85      2126
-     Grade E       0.74      0.71      0.72      1208
-     Grade F       0.55      0.50      0.52       753
-     Grade G       0.59      0.83      0.69       608
+     Grade A       0.93      0.95      0.94      2654
+     Grade B       0.93      0.91      0.92      3774
+     Grade C       0.93      0.92      0.93      3708
+     Grade D       0.88      0.88      0.88      2126
+     Grade E       0.78      0.76      0.77      1208
+     Grade F       0.59      0.59      0.59       753
+     Grade G       0.65      0.73      0.69       608
 
-    accuracy                           0.86     14831
-   macro avg       0.79      0.80      0.79     14831
-weighted avg       0.86      0.86      0.86     14831
+    accuracy                           0.88     14831
+   macro avg       0.81      0.82      0.82     14831
+weighted avg       0.88      0.88      0.88     14831

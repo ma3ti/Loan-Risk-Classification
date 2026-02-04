@@ -9,17 +9,13 @@ import random
 import numpy as np
 import torch
 
-# ──────────────────────────────────────────────
 # Paths
-# ──────────────────────────────────────────────
 DATA_DIR = os.path.join(".", "data")
 TRAIN_CSV = os.path.join(DATA_DIR, "train.csv")
 MODEL_DIR = os.path.join(".", "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# ──────────────────────────────────────────────
 # Reproducibility
-# ──────────────────────────────────────────────
 SEED = 42
 
 
@@ -44,9 +40,6 @@ def fix_random(seed: int = SEED) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-# ──────────────────────────────────────────────
-# Device
-# ──────────────────────────────────────────────
 def get_device() -> torch.device:
     """Auto-detect best available device."""
     if torch.backends.mps.is_available():
@@ -58,9 +51,7 @@ def get_device() -> torch.device:
 
 DEVICE = get_device()
 
-# ──────────────────────────────────────────────
 # Scoring (used by ML GridSearchCV)
-# ──────────────────────────────────────────────
 SCORING_METRICS = {
     "accuracy": "accuracy",
     "balanced_accuracy": "balanced_accuracy",

@@ -33,10 +33,7 @@ from sklearn.preprocessing import (
 
 from config import SEED, TRAIN_CSV
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 1.  LOADING
-# ══════════════════════════════════════════════════════════════════════════════
-
+# load dataset and remove duplicates rows if present
 def load_data(path: str = TRAIN_CSV) -> pd.DataFrame:
     """Load CSV, drop exact-duplicate rows, return DataFrame."""
     df = pd.read_csv(path)
@@ -46,12 +43,7 @@ def load_data(path: str = TRAIN_CSV) -> pd.DataFrame:
     return df
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 2.  FEATURE ENGINEERING  (faithfully preserves your notebook logic)
-# ══════════════════════════════════════════════════════════════════════════════
-
-# ---------- helpers used inside feature_engineer ----------
-
+# helpers used inside feature_engineer
 _REGIONS = {
     "northeast": ["ct", "me", "ma", "nh", "ri", "vt", "nj", "ny", "pa"],
     "midwest": ["il", "in", "mi", "oh", "wi", "ia", "ks", "mn", "mo",
@@ -79,14 +71,12 @@ _RISK_ORDER = {
     "charged off": 5,
 }
 
-
 def _get_state_region(state: str) -> str:
     s = str(state).lower()
     for region, states in _REGIONS.items():
         if s in states:
             return region
     return "unknown"
-
 
 def _get_zip_region(zip_code) -> str:
     try:
@@ -106,7 +96,6 @@ def _get_zip_region(zip_code) -> str:
     except Exception:
         return "unknown"
     return "unknown"
-
 
 class LoanTitleProcessor(BaseEstimator, TransformerMixin):
     """Semantic grouping + frequency features for loan_title."""
@@ -166,9 +155,7 @@ class LoanTitleProcessor(BaseEstimator, TransformerMixin):
         X.drop(columns=["loan_title"], inplace=True)
         return X
 
-
-# ---------- main feature engineering function ----------
-
+# Feature engineering function
 def feature_engineer(X: pd.DataFrame, y=None):
     """
     Apply ALL feature-engineering steps from the notebook.
@@ -187,21 +174,20 @@ def feature_engineer(X: pd.DataFrame, y=None):
     """
     X = X.copy()
 
-    # ── 2a. Drop cols with > 80% missing ────────────────────────────
+    # Drop cols with > 80% missing
     miss = X.isna().mean()
     drop_high_miss = miss[miss > 0.80].index.tolist()
     X.drop(columns=drop_high_miss, inplace=True, errors="ignore")
     print(f"Dropped {len(drop_high_miss)} cols with >80% missing")
 
-    # ── 2a2. Drop next_payment_date (operational, not predictive) ────
+    # Drop next_payment_date feature (not useful for modeling)
     if "next_payment_date" in X.columns:
         X.drop(columns=["next_payment_date"], inplace=True)
         print("Dropped next_payment_date (operational column)")
 
-    # ── 2a3. Handle specific "months_since_*" columns ─────────────────
-    # These have meaningful missingness: missing = "never happened" (good credit).
+    # Handle specific "months_since_*" columns
+    # These cols have a meaningful missingness: missing = "never happened" (good credit).
     # Create binary flag + impute with -1 to preserve this signal.
-    # Only apply to these specific columns (50-80% missing, meaningful pattern).
     months_since_special = [
         "months_since_last_delinquency",
         "months_since_recent_revolving_delinquency",
@@ -217,9 +203,8 @@ def feature_engineer(X: pd.DataFrame, y=None):
     if processed_months_since:
         print(f"Processed {len(processed_months_since)} 'months_since_*' cols (added _ever flags, imputed -1)")
 
-    # ── 2a4. Impute remaining categorical cols with "missing" ────────
-    # This ensures categoricals with moderate missingness get a proper
-    # category instead of causing issues downstream.
+    # Impute remaining categorical cols with "missing"
+    # This ensures categoricals with moderate missingness get a proper category instead of causing issues downstream.
     cat_cols_early = X.select_dtypes(include=["object", "category"]).columns.tolist()
     for col in cat_cols_early:
         if X[col].isna().any():
@@ -228,7 +213,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
         n_imputed = sum(1 for c in cat_cols_early if "missing" in X[c].values)
         print(f"Imputed 'missing' category in {n_imputed} categorical cols")
 
-    # ── 2b. Drop collinear (r > 0.95) ────────────────────────────────
+    # Drop collinear (r > 0.95) numeric columns
     num_df = X.select_dtypes(include=[np.number])
     corr = num_df.corr().abs()
     upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
@@ -236,7 +221,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
     X.drop(columns=collinear_drop, inplace=True, errors="ignore")
     print(f"Dropped {len(collinear_drop)} collinear cols")
 
-    # ── 2c. Convert hidden-numeric columns ────────────────────────────
+    # Convert hidden-numeric columns
     if "loan_contract_term_months" in X.columns:
         X["loan_contract_term_months"] = pd.to_numeric(
             X["loan_contract_term_months"].str.replace(" months", ""),
@@ -257,7 +242,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
         med = X["borrower_profile_employment_length"].median()
         X["borrower_profile_employment_length"].fillna(med, inplace=True)
 
-    # ── 2d. Cyclical date encoding ────────────────────────────────────
+    # Cyclical date encoding + derived features
     date_cols = [
         "loan_issue_date",
         "credit_history_earliest_line",
@@ -284,7 +269,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
             X[f"{col}_days_since_ref"] = (X[col] - ref_date).dt.days
             X.drop(columns=[col], inplace=True)
 
-    # ── 2e. Categorical analysis ──────────────────────────────────────
+    # Categorical analysis
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     ordinal_cols = []
     one_hot_cols = []
@@ -296,9 +281,8 @@ def feature_engineer(X: pd.DataFrame, y=None):
             ordinal_cols.append(col)
         elif n <= 51:
             one_hot_cols.append(col)
-        # high cardinality handled explicitly below
 
-    # ── 2f. borrower_housing_ownership_status ─────────────────────────
+    # borrower_housing_ownership_status
     if "borrower_housing_ownership_status" in X.columns:
         X["borrower_housing_ownership_status"] = (
             X["borrower_housing_ownership_status"]
@@ -306,13 +290,13 @@ def feature_engineer(X: pd.DataFrame, y=None):
             .fillna("other")
         )
 
-    # ── 2g. borrower_income_verification_status ───────────────────────
+    # borrower_income_verification_status
     if "borrower_income_verification_status" in X.columns:
         X["borrower_income_verification_status"].fillna(
             "not verified", inplace=True
         )
 
-    # ── 2h. loan_status_current_code  (ordinal mapping) ──────────────
+    # loan_status_current_code  (ordinal mapping)
     if "loan_status_current_code" in X.columns:
         X["loan_status_current_code"] = (
             X["loan_status_current_code"].replace(_STATUS_MAP)
@@ -325,7 +309,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
         if "loan_status_current_code" in one_hot_cols:
             one_hot_cols.remove("loan_status_current_code")
 
-    # ── 2i. borrower_address_state -> region features ─────────────────
+    # borrower_address_state -> region features
     if "borrower_address_state" in X.columns:
         X["borrower_address_state"].fillna("unknown", inplace=True)
         X["state_region"] = X["borrower_address_state"].apply(_get_state_region)
@@ -344,7 +328,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
             one_hot_cols.remove("borrower_address_state")
         one_hot_cols.append("state_region")
 
-    # ── 2j. borrower_address_zip -> region + frequency ────────────────
+    # borrower_address_zip -> region + frequency
     if "borrower_address_zip" in X.columns:
         X["borrower_address_zip"].fillna("unknown", inplace=True)
         X["zip3_prefix"] = X["borrower_address_zip"].str[:3]
@@ -355,7 +339,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
         one_hot_cols.append("zip_region")
         target_encode_cols.append("zip3_prefix")
 
-    # ── 2k. loan_title processing ─────────────────────────────────────
+    # loan_title processing
     if "loan_title" in X.columns:
         proc = LoanTitleProcessor()
         proc.fit(X)
@@ -363,17 +347,17 @@ def feature_engineer(X: pd.DataFrame, y=None):
         # loan_category goes to one-hot
         one_hot_cols.append("loan_category")
 
-    # ── 2l. Drop loan_purpose_category ────────────────────────────────
+    # Drop loan_purpose_category
     if "loan_purpose_category" in X.columns:
         X.drop(columns=["loan_purpose_category"], inplace=True)
         if "loan_purpose_category" in one_hot_cols:
             one_hot_cols.remove("loan_purpose_category")
 
-    # ── 2m. Convert remaining Int64 -> float64 ────────────────────────
+    # Convert remaining Int64 -> float64
     int_cols = X.select_dtypes(include=["int64"]).columns.tolist()
     X[int_cols] = X[int_cols].astype("float64")
 
-    # ── 2n. Skewness analysis on numeric cols ─────────────────────────
+    # Skewness analysis on numeric cols
     numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     skewness = X[numeric_cols].apply(lambda c: c.skew())
     highly_skewed = skewness[skewness.abs() > 1].index.tolist()
@@ -381,7 +365,7 @@ def feature_engineer(X: pd.DataFrame, y=None):
     negative_cols = [c for c in highly_skewed if (X[c] < 0).any()]
     safe_log_cols = [c for c in highly_skewed if c not in negative_cols]
 
-    # ── Clean up column lists (ensure they still exist) ───────────────
+    # Clean up column lists (ensure they still exist)
     existing = set(X.columns)
     ordinal_cols = [c for c in ordinal_cols if c in existing]
     one_hot_cols = [c for c in one_hot_cols if c in existing]
@@ -410,13 +394,10 @@ def feature_engineer(X: pd.DataFrame, y=None):
     return X, col_lists
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 3.  ML PREPROCESSOR  (for RF / KNN / SVM – same as your notebook)
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ML preprocessor for RF, KNN and SVM models
 def build_ml_preprocessor(col_lists: dict, seed: int = SEED):
     """
-    Build the ColumnTransformer + global scaler used by sklearn pipelines.
+    Build the ColumnTransformer + global scaler used by pipelines.
 
     Returns
     -------
@@ -485,11 +466,7 @@ def build_ml_preprocessor(col_lists: dict, seed: int = SEED):
 
     return preprocessor, global_scaler
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 4.  DL PREPROCESSOR  (ordinal cats, StandardScaler, no one-hot)
-# ══════════════════════════════════════════════════════════════════════════════
-
+# DL preprocessor: ordinal cats, StandardScaler, no one-hot
 def build_dl_preprocessor(X_reference: pd.DataFrame):
     """
     Build a DL-specific ColumnTransformer.
@@ -536,10 +513,7 @@ def build_dl_preprocessor(X_reference: pd.DataFrame):
     return dl_preprocessor, numerical_cols, categorical_cols
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 5.  HIGH-LEVEL CONVENIENCE: prepare_ml_data  /  prepare_dl_data
-# ══════════════════════════════════════════════════════════════════════════════
-
+# Full ML data preparation pipeline
 def prepare_ml_data(path: str = TRAIN_CSV, seed: int = SEED):
     """
     Full pipeline for traditional ML:
@@ -562,6 +536,7 @@ def prepare_ml_data(path: str = TRAIN_CSV, seed: int = SEED):
     return X, y, col_lists, preprocessor, global_scaler, le
 
 
+# Full DL data preparation pipeline
 def prepare_dl_data(
     path: str = TRAIN_CSV,
     val_size: float = 0.10,
@@ -594,7 +569,7 @@ def prepare_dl_data(
     le = LabelEncoder()
     y_encoded = le.fit_transform(y_full)
 
-    # First split: separate test
+    # separate test
     X_temp, X_test, y_temp, y_test = train_test_split(
         X_full, y_encoded,
         test_size=test_size,
@@ -602,7 +577,7 @@ def prepare_dl_data(
         random_state=seed,
     )
 
-    # Second split: separate val from remaining
+    # separate val
     relative_val = val_size / (1 - test_size)
     X_train, X_val, y_train, y_val = train_test_split(
         X_temp, y_temp,
@@ -615,12 +590,11 @@ def prepare_dl_data(
     print(f"Val  : {len(X_val)} ({len(X_val)/len(X_full)*100:.1f}%)")
     print(f"Test : {len(X_test)} ({len(X_test)/len(X_full)*100:.1f}%)")
 
-    # Feature engineering – fit statistics on TRAIN only
+    # Feature engineering fit statistics on TRAIN only
     # We need to apply the same transforms to val/test without re-fitting
-    # frequency/count columns, so we build on train, then align val/test.
     X_train, col_lists = feature_engineer(X_train)
-    X_val = _apply_feature_engineer_transform(X_val, X_train)
-    X_test = _apply_feature_engineer_transform(X_test, X_train)
+    X_val = apply_feature_engineer_transform(X_val, X_train)
+    X_test = apply_feature_engineer_transform(X_test, X_train)
 
     # Build DL preprocessor from train columns
     dl_preprocessor, numerical_cols, categorical_cols = build_dl_preprocessor(X_train)
@@ -694,7 +668,7 @@ def prepare_dl_data(
     }
 
 
-def _apply_feature_engineer_transform(X_new: pd.DataFrame, X_train_ref: pd.DataFrame) -> pd.DataFrame:
+def apply_feature_engineer_transform(X_new: pd.DataFrame, X_train_ref: pd.DataFrame) -> pd.DataFrame:
     """
     Apply the same feature engineering to val/test that was applied to train.
 
@@ -713,10 +687,7 @@ def _apply_feature_engineer_transform(X_new: pd.DataFrame, X_train_ref: pd.DataF
     return X
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 6.  UTILITIES
-# ══════════════════════════════════════════════════════════════════════════════
-
+# Convenience: LabelEncoder fit_transform
 def encode_target(y):
     """Convenience: LabelEncoder fit_transform."""
     le = LabelEncoder()
