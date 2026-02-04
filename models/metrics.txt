@@ -18,3 +18,75 @@
   balanced_accuracy        : 0.6032 ± 0.0075
   f1_weighted              : 0.6482 ± 0.0047
   f1_macro                 : 0.6099 ± 0.0055
+
+
+
+==================================================
+  FFNN Test Set Evaluation
+==================================================
+  Accuracy          : 0.9200
+  Balanced Accuracy : 0.8834
+  F1 (weighted)     : 0.9200
+  F1 (macro)        : 0.8785
+
+              precision    recall  f1-score   support
+
+     Grade A       0.94      0.97      0.96      2654
+     Grade B       0.96      0.93      0.94      3774
+     Grade C       0.94      0.95      0.95      3708
+     Grade D       0.93      0.91      0.92      2126
+     Grade E       0.86      0.86      0.86      1208
+     Grade F       0.76      0.69      0.72       753
+     Grade G       0.74      0.86      0.80       608
+
+    accuracy                           0.92     14831
+   macro avg       0.88      0.88      0.88     14831
+weighted avg       0.92      0.92      0.92     14831
+
+
+
+==================================================
+  TabNet Test Set Evaluation
+==================================================
+  Accuracy          : 0.9567
+  Balanced Accuracy : 0.9446
+  F1 (weighted)     : 0.9567
+  F1 (macro)        : 0.9431
+
+              precision    recall  f1-score   support
+
+     Grade A       0.98      0.98      0.98      2654
+     Grade B       0.97      0.96      0.97      3774
+     Grade C       0.96      0.96      0.96      3708
+     Grade D       0.95      0.95      0.95      2126
+     Grade E       0.94      0.92      0.93      1208
+     Grade F       0.89      0.90      0.90       753
+     Grade G       0.91      0.92      0.92       608
+
+    accuracy                           0.96     14831
+   macro avg       0.94      0.94      0.94     14831
+weighted avg       0.96      0.96      0.96     14831
+
+
+
+==================================================
+  TabTransformer Test Set Evaluation
+==================================================
+  Accuracy          : 0.8879
+  Balanced Accuracy : 0.8309
+  F1 (weighted)     : 0.8885
+  F1 (macro)        : 0.8261
+
+              precision    recall  f1-score   support
+
+     Grade A       0.94      0.95      0.95      2654
+     Grade B       0.93      0.93      0.93      3774
+     Grade C       0.94      0.92      0.93      3708
+     Grade D       0.90      0.88      0.89      2126
+     Grade E       0.78      0.80      0.79      1208
+     Grade F       0.60      0.61      0.61       753
+     Grade G       0.67      0.73      0.70       608
+
+    accuracy                           0.89     14831
+   macro avg       0.82      0.83      0.83     14831
+weighted avg       0.89      0.89      0.89     14831

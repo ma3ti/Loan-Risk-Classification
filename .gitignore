@@ -3,7 +3,6 @@
 ./best_models/
 __pycache__/
 *.zip
-test.py
 test_knn.py
-test_professor.py
 ./deliver_test/
+test_fix.py
