@@ -31,13 +31,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from sklearn.svm import SVC
 
+
 from config import MODEL_DIR, SCORING_METRICS, SEED
+from data_processing import feature_engineer, FeatureEngineer
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# UTILITIES  (called from the notebook, not inside train_ functions)
-# ══════════════════════════════════════════════════════════════════════════════
-
+# UTILITIES FOR SAVING, PRINTING, PLOTTING
 def save_model(model, name: str) -> str:
     """Pickle a model to MODEL_DIR.  Call from the notebook after training."""
     path = os.path.join(MODEL_DIR, f"{name}.pkl")
@@ -107,64 +106,93 @@ def plot_rf_feature_importances(gs: GridSearchCV, top_k: int = 20, save_path: st
 
 
 
-# RANDOM FOREST
-def train_random_forest(X, y, preprocessor, param_grid: Optional[dict] = None, cv: int = 3, seed: int = SEED) -> GridSearchCV:
-    """
-    Train Random Forest with GridSearchCV.
+# RANDOM FOREST training
+def train_random_forest(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=SEED) -> GridSearchCV:
+    """ Train Random Forest with GridSearchCV.
+    
+    Parameters
+    ----------
+    X : feature DataFrame
+    y : target Series
+    feature_engineer : FeatureEngineer instance
+    preprocessor : preprocessor instance
+    param_grid : dict
+        GridSearchCV param grid. If None, use default.
+    cv : int
+        Number of CV folds.
+    seed : int
+        Random seed for reproducibility.
 
-    Returns the fitted GridSearchCV.  Save / print from the notebook.
-    """
+    Returns
+    -------
+    GridSearchCV
+        Fitted GridSearchCV object.
+    """    
+
     pipeline = Pipeline([
-        ("preprocessor", preprocessor),
+        ("engineer", feature_engineer),
+        ("preprocessor", preprocessor), 
         ("classifier", RandomForestClassifier(
-            random_state=seed,
+            random_state=seed, 
             class_weight="balanced_subsample",
-            n_jobs=-1,
-        )),
+            n_jobs=-1
+        ))
     ])
 
     if param_grid is None:
         param_grid = {
-            "classifier__n_estimators": [300, 500],
-            "classifier__max_depth": [None],
-            "classifier__min_samples_split": [8, 10],
-            "classifier__min_samples_leaf": [1, 2],
-            "classifier__max_features": ["sqrt", 0.3],
+            "classifier__n_estimators": [100, 200],
+            "classifier__max_depth": [10, 20],
         }
 
     gs = GridSearchCV(
-        pipeline, param_grid,
-        cv=cv,
+        pipeline, 
+        param_grid, 
+        cv=cv, 
         scoring=SCORING_METRICS,
-        refit="f1_macro",
+        refit="f1_macro", 
         n_jobs=-1,
+        verbose=1
     )
-
-    print("Starting Random Forest GridSearch...")
+    
+    print("Starting RF GridSearch...")
     gs.fit(X, y)
-    print("Random Forest GridSearch complete.")
+    print("RF GridSearch complete.")
+    
     return gs
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# KNN
-# ══════════════════════════════════════════════════════════════════════════════
+# KNN training
+def train_knn(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=SEED) -> GridSearchCV:
+    """Train KNN with GridSearchCV 
+    
+    Parameters
+    ----------
+    X : feature DataFrame
+    y : target Series
+    feature_engineer : FeatureEngineer instance
+    preprocessor : preprocessor instance
+    param_grid : dict
+        GridSearchCV param grid. If None, use default.
+    cv : int
+        Number of CV folds.
+    seed : int
+        Random seed for reproducibility.    
+    
+    Returns
+    -------
+    GridSearchCV
+        Fitted GridSearchCV object.
+    """
 
-def train_knn(
-    X,
-    y,
-    preprocessor,
-    global_scaler,
-    param_grid: Optional[dict] = None,
-    cv: int = 3,
-    seed: int = SEED,
-) -> GridSearchCV:
-    """Train KNN with GridSearchCV (includes PCA + scaler)."""
+
     pipeline = Pipeline([
-        ("preprocessor", preprocessor),
-        ("scaler", global_scaler),
+        ("engineer", feature_engineer), 
+        ("preprocessor", preprocessor),     
         ("pca", PCA(random_state=seed)),
-        ("classifier", KNeighborsClassifier(n_jobs=-1)),
+        ("classifier", KNeighborsClassifier(
+            n_jobs=-1
+        ))
     ])
 
     if param_grid is None:
@@ -177,42 +205,53 @@ def train_knn(
         }
 
     gs = GridSearchCV(
-        pipeline, param_grid,
+        pipeline, 
+        param_grid,
         cv=cv,
         scoring=SCORING_METRICS,
         refit="f1_macro",
         n_jobs=-1,
+        verbose=1
     )
-
+    
     print("Starting KNN GridSearch...")
     gs.fit(X, y)
     print("KNN GridSearch complete.")
+    
     return gs
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SVM
-# ══════════════════════════════════════════════════════════════════════════════
-
-def train_svm(
-    X,
-    y,
-    preprocessor,
-    global_scaler,
-    param_grid: Optional[dict] = None,
-    cv: int = 3,
-    seed: int = SEED,
-) -> GridSearchCV:
-    """Train SVM with GridSearchCV."""
+# SVM training 
+def train_svm(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=SEED) -> GridSearchCV:
+    """Train SVM with GridSearchCV.
+    
+    Parameters
+    ----------
+    X : feature DataFrame
+    y : target Series
+    feature_engineer : FeatureEngineer instance
+    preprocessor : preprocessor instance
+    param_grid : dict
+        GridSearchCV param grid. If None, use default.
+    cv : int
+        Number of CV folds.
+    seed : int
+        Random seed for reproducibility.    
+    
+    Returns
+    -------
+    GridSearchCV
+        Fitted GridSearchCV object.
+    """
+    
     pipeline = Pipeline([
-        ("preprocessor", preprocessor),
-        ("scaler", global_scaler),
+        ("engineer", feature_engineer),
+        ("preprocessor", preprocessor),        
         ("classifier", SVC(
             class_weight="balanced",
             random_state=seed,
             max_iter=1000,
             cache_size=6000,
-        )),
+        ))
     ])
 
     if param_grid is None:
@@ -224,14 +263,17 @@ def train_svm(
         }
 
     gs = GridSearchCV(
-        pipeline, param_grid,
+        pipeline, 
+        param_grid,
         cv=cv,
         scoring=SCORING_METRICS,
         refit="f1_macro",
         n_jobs=-1,
+        verbose=1
     )
 
     print("Starting SVM GridSearch...")
     gs.fit(X, y)
     print("SVM GridSearch complete.")
+    
     return gs
