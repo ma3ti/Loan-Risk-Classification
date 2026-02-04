@@ -13,7 +13,7 @@ Public API:
     train_random_forest(X, y, preprocessor, ...)  -> GridSearchCV
     train_knn(X, y, preprocessor, global_scaler, ...)  -> GridSearchCV
     train_svm(X, y, preprocessor, global_scaler, ...)  -> GridSearchCV
-    save_model(model, name)                        -> path
+    save_split_model(fitted_gs, model_name)        -> None
     print_grid_results(grid_search, model_name)    -> None
     plot_rf_feature_importances(gs, top_k)         -> None
 """
@@ -33,7 +33,7 @@ from sklearn.svm import SVC
 
 
 from config import MODEL_DIR, SCORING_METRICS, SEED
-from data_processing import feature_engineer, FeatureEngineer
+#from data_processing import feature_engineer, FeatureEngineer
 
 
 # UTILITIES FOR SAVING, PRINTING, PLOTTING
@@ -44,6 +44,38 @@ def save_model(model, name: str) -> str:
         pickle.dump(model, f)
     print(f"Model saved to {path}")
     return path
+
+def save_split_model(fitted_gs, name: str):
+    """
+    Splits a fitted Pipeline into two parts and saves them:
+    1. Preprocessor (All steps EXCEPT the last one) -> models/{name}_preprocessor.pkl
+    2. Classifier (The LAST step) -> models/{name}_classifier.pkl
+    
+    This works for:
+    - RF:  [Engineer, Prep] + [RF]
+    - SVM:  [Engineer, Prep] + [SVM]
+    - KNN: [Engineer, Prep, PCA] + [KNN]
+    """
+    os.makedirs("models", exist_ok=True)
+    
+    # Get the best estimator (The Full Pipeline)
+    full_pipeline = fitted_gs.best_estimator_
+    
+    # Preprocessor: for KNN, this includes Engineer + Prep + PCA
+    preprocessor_chain = Pipeline(full_pipeline.steps[:-1])
+    path_prep = f"models/{name}_preprocessor.pkl"
+    with open(path_prep, "wb") as f:
+        pickle.dump(preprocessor_chain, f)
+        
+    # Classifier
+    classifier_model = full_pipeline.steps[-1][1]
+    path_clf = f"models/{name}_classifier.pkl"
+    with open(path_clf, "wb") as f:
+        pickle.dump(classifier_model, f)
+        
+    print(f"[{name.upper()}] Saved Successfully:")
+    print(f"  Preprocessor: {path_prep}")
+    print(f"  Classifier:   {path_clf}")
 
 
 def print_grid_results(gs: GridSearchCV, name: str) -> None:

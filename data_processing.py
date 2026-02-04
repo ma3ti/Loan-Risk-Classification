@@ -537,12 +537,7 @@ def build_dl_preprocessor(X_reference: pd.DataFrame):
 
 
 # Full DL data preparation pipeline
-def prepare_dl_data(
-    path: str = TRAIN_CSV,
-    val_size: float = 0.10,
-    test_size: float = 0.10,
-    seed: int = SEED,
-):
+def prepare_dl_data_old(path: str = TRAIN_CSV, val_size: float = 0.10, test_size: float = 0.10, seed: int = SEED):
     """
     Full pipeline for DL models:
       load -> split -> feature_engineer (fit on train) -> DL preprocess
@@ -571,7 +566,8 @@ def prepare_dl_data(
 
     # separate test
     X_temp, X_test, y_temp, y_test = train_test_split(
-        X_full, y_encoded,
+        X_full, 
+        y_encoded,
         test_size=test_size,
         stratify=y_encoded,
         random_state=seed,
@@ -580,7 +576,8 @@ def prepare_dl_data(
     # separate val
     relative_val = val_size / (1 - test_size)
     X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp,
+        X_temp, 
+        y_temp,
         test_size=relative_val,
         stratify=y_temp,
         random_state=seed,
@@ -666,6 +663,65 @@ def prepare_dl_data(
         "col_lists": col_lists,
         "num_classes": len(le.classes_),
     }
+
+
+def prepare_dl_data(path: str = TRAIN_CSV, val_size: float = 0.10, test_size: float = 0.10, seed: int = SEED) -> dict:
+    df = load_data(path)
+    X_full = df.drop(columns=["grade"])
+    y_full = df["grade"]
+
+    # Encode target
+    le = LabelEncoder()
+    y_encoded = le.fit_transform(y_full)
+
+    # separate test
+    X_temp, X_test, y_temp, y_test = train_test_split(
+        X_full, 
+        y_encoded,
+        test_size=test_size,
+        stratify=y_encoded,
+        random_state=seed,
+    )
+
+    # separate val
+    relative_val = val_size / (1 - test_size)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_temp, 
+        y_temp,
+        test_size=relative_val,
+        stratify=y_temp,
+        random_state=seed,
+    )
+
+    print(f"Train: {len(X_train)} ({len(X_train)/len(X_full)*100:.1f}%)")
+    print(f"Val  : {len(X_val)} ({len(X_val)/len(X_full)*100:.1f}%)")
+    print(f"Test : {len(X_test)} ({len(X_test)/len(X_full)*100:.1f}%)")
+
+    numerical_cols = X_full.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = X_full.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    n_num = len(numerical_cols)
+    n_cat = len(categorical_cols)
+    feature_names = numerical_cols + categorical_cols
+
+    return {
+        "X_train": X_train,
+        "X_val": X_val,
+        "X_test": X_test,
+        "y_train": y_train,
+        "y_val": y_val,
+        "y_test": y_test,
+        "label_encoder": le,
+        "numerical_cols": numerical_cols,
+        "categorical_cols": categorical_cols,
+        "feature_names": feature_names,
+        "num_num_cols": n_num,
+        "num_cat_cols": n_cat,
+        "num_classes": len(le.classes_),
+    }   
+
+
+
 
 
 def apply_feature_engineer_transform(X_new: pd.DataFrame, X_train_ref: pd.DataFrame) -> pd.DataFrame:
@@ -957,3 +1013,534 @@ def prepare_ml_data(path: str = TRAIN_CSV):
     
     # Return RAW data + The Class Instance + The Preprocessor Instance
     return X, y, FeatureEngineer(), build_dynamic_preprocessor(), le
+
+
+
+
+
+
+
+
+# --- ADD THIS HELPER FUNCTION AT MODULE LEVEL (Outside the class) ---
+def _safe_log1p(X):
+    """
+    Applies log1p safely by clipping negative values to 0 first.
+    Required because 'months_since' columns have -1 for missing values.
+    """
+    return np.log1p(np.clip(X, 0, None))
+
+# --- UPDATE THE CLASS ---
+# class FFNNPreprocessor(BaseEstimator, TransformerMixin):
+#     def __init__(self):
+#         self.cols_to_drop_ = []
+#         self.expected_columns_ = []
+#         self.medians_ = {}
+
+#         # Frequency / Encoding Maps
+#         self.state_counts_ = None
+#         self.zip_counts_ = None
+#         self.loan_title_proc_ = LoanTitleProcessor() # Use your existing class
+
+#         #self.modes_ = {}
+#         #self.log_cols_ = []
+#         self.dl_preprocessor_ = None
+#         #self.num_cols_idx_ = [] 
+#         self.num_cols_count_ = 0
+#         self.cat_cols_count_ = 0
+        
+#     def fit(self, X, y=None):
+#         X = X.copy()
+#         self.expected_columns_ = X.columns.tolist()
+        
+#         # Drop > 80% Missing
+#         miss = X.isna().mean()
+#         high_miss = miss[miss > 0.80].index.tolist()
+#         self.cols_to_drop_.extend(high_miss)
+        
+#         # Drop Collinear Columns (> 0.95)
+#         num_df = X.select_dtypes(include=[np.number])
+#         if not num_df.empty:
+#             corr = num_df.corr().abs()
+#             upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+#             self.cols_to_drop_ += [c for c in upper.columns if any(upper[c] > 0.95)]
+            
+#         X_temp = X.drop(columns=self.cols_to_drop_, errors='ignore')
+        
+#         if "loan_contract_term_months" in X_temp.columns:
+#             # Convert temporarily to find mode
+#             clean_term = pd.to_numeric(
+#                 X_temp["loan_contract_term_months"].str.replace(" months", ""), 
+#                 errors='coerce'
+#             )
+#             self.modes_["loan_contract_term_months"] = clean_term.mode()[0]
+
+#         # Learn Medians
+#         numeric_cols = X_temp.select_dtypes(include=[np.number]).columns
+#         for c in numeric_cols:
+#             self.medians_[c] = X_temp[c].median()
+            
+#         if "borrower_profile_employment_length" in X_temp.columns:
+#             series = X_temp["borrower_profile_employment_length"].replace(
+#                 {"< 1 year": "0 years", "10+ years": "10 years"}
+#             ).str.extract(r"(\d+)").astype(float)
+#             self.medians_["borrower_profile_employment_length"] = series.median()[0]
+
+#         if "borrower_address_state" in X_temp.columns:
+#             self.state_counts_ = X_temp["borrower_address_state"].value_counts()
+            
+#         if "borrower_address_zip" in X_temp.columns:
+#             zip3 = X_temp["borrower_address_zip"].astype(str).str[:3]
+#             self.zip_counts_ = zip3.value_counts()
+            
+#         # F. Fit Loan Title Processor
+#         if "loan_title" in X_temp.columns:
+#             self.loan_title_proc_.fit(X_temp)
+
+#         # --- 2. BUILD INNER TRANSFORMER ---
+#         # Transform first to get the final columns for the ColumnTransformer
+#         X_eng = self._feature_engineer_transform(X)
+        
+#         dl_numeric_cols = X_eng.select_dtypes(include=[np.number]).columns.tolist()
+#         dl_cat_cols = X_eng.select_dtypes(include=["object", "category"]).columns.tolist()
+        
+#         self.num_cols_count_ = len(dl_numeric_cols)
+#         self.cat_cols_count_ = len(dl_cat_cols)
+        
+#         # [FIX IS HERE] Use the safe function instead of standard np.log1p
+#         dl_numeric_transformer = Pipeline([
+#             ("imputer", SimpleImputer(strategy="median")),
+#             ("log", FunctionTransformer(func=_safe_log1p, validate=False)), 
+#             ("scaler", StandardScaler()),
+#         ])
+
+#         dl_categorical_transformer = Pipeline([
+#             ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+#             ("ordinal", OrdinalEncoder(
+#                 handle_unknown="use_encoded_value", unknown_value=-1
+#             )),
+#         ])
+
+#         self.dl_preprocessor_ = ColumnTransformer([
+#             ("num", dl_numeric_transformer, dl_numeric_cols),
+#             ("cat", dl_categorical_transformer, dl_cat_cols),
+#         ])
+        
+#         self.dl_preprocessor_.fit(X_eng)
+#         return self
+
+#     def transform(self, X):
+#         X_eng = self._feature_engineer_transform(X)
+#         X_trans = self.dl_preprocessor_.transform(X_eng)
+        
+#         if hasattr(X_trans, "toarray"):
+#             X_trans = X_trans.toarray()
+            
+#         # Shift Categoricals (+1)
+#         if self.cat_cols_count_ > 0:
+#             X_trans[:, self.num_cols_count_:] += 1
+            
+#         return X_trans.astype(np.float32)
+
+#     def _feature_engineer_transform(self, X):
+#         X = X.copy()
+#         X.drop(columns=self.cols_to_drop_, errors='ignore', inplace=True)
+        
+#         if "next_payment_date" in X.columns:
+#             X.drop(columns=["next_payment_date"], inplace=True)
+#         if "loan_purpose_category" in X.columns:
+#             X.drop(columns=["loan_purpose_category"], inplace=True)
+
+#         months_cols = [
+#             "months_since_last_delinquency", 
+#             "months_since_recent_revolving_delinquency",
+#             "months_since_last_major_derog",
+#             "months_since_recent_bankcard_delinquency"
+#         ]
+#         for col in months_cols:
+#             if col in X.columns:
+#                 X[f"{col}_ever"] = X[col].notna().astype(float)
+#                 # This -1 was causing the crash without the safe log!
+#                 X[col] = X[col].fillna(-1) 
+
+#         date_cols = ["loan_issue_date", "credit_history_earliest_line", "last_payment_date", "last_credit_pull_date"]
+#         for col in date_cols:
+#             if col in X.columns:
+#                 X[col] = pd.to_datetime(X[col], format="%b-%Y", errors='coerce')
+#                 X[f"{col}_year"] = X[col].dt.year
+#                 X.drop(columns=[col], inplace=True)
+
+#         if "borrower_profile_employment_length" in X.columns:
+#             X["borrower_profile_employment_length"] = X["borrower_profile_employment_length"].replace(
+#                 {"< 1 year": "0 years", "10+ years": "10 years"}
+#             ).str.extract(r"(\d+)").astype(float)
+#             if "borrower_profile_employment_length" in self.medians_:
+#                  X["borrower_profile_employment_length"].fillna(
+#                      self.medians_["borrower_profile_employment_length"], inplace=True
+#                  )
+                 
+#         # 4. Dates & Cyclical
+#         date_cols = ["loan_issue_date", "credit_history_earliest_line", "last_payment_date", "last_credit_pull_date"]
+#         ref_date = pd.Timestamp("2020-01-01")
+        
+#         # Helper for credit history length
+#         if {"loan_issue_date", "credit_history_earliest_line"}.issubset(X.columns):
+#             d1 = pd.to_datetime(X["loan_issue_date"], format="%b-%Y", errors='coerce')
+#             d2 = pd.to_datetime(X["credit_history_earliest_line"], format="%b-%Y", errors='coerce')
+#             X["credit_history_length_months"] = (d1 - d2).dt.days / 30
+
+#         for col in date_cols:
+#             if col in X.columns:
+#                 X[col] = pd.to_datetime(X[col], format="%b-%Y", errors='coerce')
+#                 X[f"{col}_year"] = X[col].dt.year
+#                 month = X[col].dt.month
+#                 X[f"{col}_month_sin"] = np.sin(2 * np.pi * month / 12)
+#                 X[f"{col}_month_cos"] = np.cos(2 * np.pi * month / 12)
+#                 X[f"{col}_quarter"] = X[col].dt.quarter
+#                 X[f"{col}_days_since_ref"] = (X[col] - ref_date).dt.days
+#                 X.drop(columns=[col], inplace=True)
+
+#         # 5. Loan Title NLP
+#         if "loan_title" in X.columns:
+#             X = self.loan_title_proc_.transform(X)
+
+#         # 6. State Logic
+#         if "borrower_address_state" in X.columns:
+#             # Impute unknown
+#             X["borrower_address_state"] = X["borrower_address_state"].fillna("unknown")
+#             # Region (Stateless helper)
+#             X["state_region"] = X["borrower_address_state"].apply(_get_state_region)
+#             # Tax (Stateless)
+#             X["state_no_income_tax"] = X["borrower_address_state"].str.lower().isin(_NO_INCOME_TAX_STATES).astype(float)
+#             # Frequency (Uses LEARNED counts)
+#             if self.state_counts_ is not None:
+#                 X["state_log_frequency"] = np.log1p(X["borrower_address_state"].map(self.state_counts_))
+            
+#             # NOTE: We leave 'borrower_address_state' as object so OrdinalEncoder handles it
+
+#         # 7. Zip Logic
+#         if "borrower_address_zip" in X.columns:
+#             X["borrower_address_zip"] = X["borrower_address_zip"].fillna("unknown")
+#             zip3 = X["borrower_address_zip"].astype(str).str[:3]
+            
+#             X["zip_region"] = X["borrower_address_zip"].apply(_get_zip_region)
+#             if self.zip_counts_ is not None:
+#                 X["zip_log_frequency"] = np.log1p(zip3.map(self.zip_counts_))
+            
+#             X.drop(columns=["borrower_address_zip"], inplace=True)
+
+#         # 8. Loan Status Mapping (Using your dictionary)
+#         if "loan_status_current_code" in X.columns:
+#              X["loan_status_current_code"] = X["loan_status_current_code"].replace(_STATUS_MAP).map(_RISK_ORDER)
+#              if "loan_status_current_code" in self.medians_:
+#                  X["loan_status_current_code"] = X["loan_status_current_code"].fillna(self.medians_["loan_status_current_code"])
+
+#         # 9. Housing & Income Verification
+#         if "borrower_housing_ownership_status" in X.columns:
+#             X["borrower_housing_ownership_status"] = X["borrower_housing_ownership_status"].replace(
+#                 {"none": "other", "any": "other"}
+#             ).fillna("other")
+            
+#         if "borrower_income_verification_status" in X.columns:
+#              X["borrower_income_verification_status"] = X["borrower_income_verification_status"].fillna("not verified")
+             
+#         # 10. Final Type Cast
+#         # Ensure remaining categoricals are filled for OrdinalEncoder
+#         cat_cols = X.select_dtypes(include=["object", "category"]).columns
+#         for col in cat_cols:
+#             if X[col].isna().any():
+#                 X[col] = X[col].fillna("missing")
+                
+#         # Ensure Int64 -> float
+#         int_cols = X.select_dtypes(include=["int64"]).columns
+#         X[int_cols] = X[int_cols].astype(float)
+
+#         return X
+
+
+
+
+    
+# data_processing.py
+
+# --- Helper function (Must be outside class for pickle) ---
+def _safe_log1p(X):
+    """Safely apply log1p, clipping negative values to 0."""
+    return np.log1p(np.clip(X, 0, None))
+
+class FFNNPreprocessor(BaseEstimator, TransformerMixin):
+    def __init__(self):
+        # Lists & State
+        self.cols_to_drop_ = []
+        self.expected_columns_ = []
+        self.medians_ = {}
+        self.modes_ = {} # Stores modes for categorical/term cols
+        
+        # Learned Frequency Maps
+        self.state_counts_ = None
+        self.zip_counts_ = None
+        
+        # Sub-Processors
+        self.loan_title_proc_ = LoanTitleProcessor() 
+        
+        # Inner Transformers
+        self.dl_preprocessor_ = None
+        self.num_cols_count_ = 0
+        self.cat_cols_count_ = 0
+
+    def fit(self, X, y=None):
+        X = X.copy()
+        self.expected_columns_ = X.columns.tolist()
+
+        # -------------------------------------------------------
+        # 1. LEARN STATISTICS & DROPS (The "FeatureEngineer" part)
+        # -------------------------------------------------------
+        
+        # A. Missing > 80%
+        miss = X.isna().mean()
+        self.cols_to_drop_ = miss[miss > 0.80].index.tolist()
+        
+        # B. Collinear > 0.95 (Numeric only)
+        num_df = X.select_dtypes(include=[np.number])
+        if not num_df.empty:
+            corr = num_df.corr().abs()
+            upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+            self.cols_to_drop_ += [c for c in upper.columns if any(upper[c] > 0.95)]
+            
+        X_temp = X.drop(columns=self.cols_to_drop_, errors='ignore')
+
+        # C. Hidden Numeric: Loan Term (Learn Mode)
+        if "loan_contract_term_months" in X_temp.columns:
+            # Clean temporarily to find mode
+            clean_term = pd.to_numeric(
+                X_temp["loan_contract_term_months"].str.replace(" months", ""), 
+                errors='coerce'
+            )
+            self.modes_["loan_contract_term_months"] = clean_term.mode()[0]
+
+        # D. Hidden Numeric: Emp Length (Learn Median)
+        if "borrower_profile_employment_length" in X_temp.columns:
+            series = X_temp["borrower_profile_employment_length"].replace(
+                {"< 1 year": "0 years", "10+ years": "10 years"}
+            ).str.extract(r"(\d+)").astype(float)
+            self.medians_["borrower_profile_employment_length"] = series.median()[0]
+
+        # E. Standard Numerics (Learn Median)
+        numeric_cols = X_temp.select_dtypes(include=[np.number]).columns
+        for c in numeric_cols:
+            self.medians_[c] = X_temp[c].median()
+
+        # F. Frequencies (State & Zip)
+        if "borrower_address_state" in X_temp.columns:
+            self.state_counts_ = X_temp["borrower_address_state"].value_counts()
+            
+        if "borrower_address_zip" in X_temp.columns:
+            # We use first 3 digits for frequency, same as ML
+            zip3 = X_temp["borrower_address_zip"].astype(str).str[:3]
+            self.zip_counts_ = zip3.value_counts()
+            
+        # G. Loan Title NLP
+        if "loan_title" in X_temp.columns:
+            self.loan_title_proc_.fit(X_temp)
+
+        # -------------------------------------------------------
+        # 2. FIT INNER TRANSFORMER (The "Scaling/Encoding" part)
+        # -------------------------------------------------------
+        # We transform X first so the ColumnTransformer sees the final engineered columns
+        X_eng = self._feature_engineer_transform(X)
+        
+        dl_numeric_cols = X_eng.select_dtypes(include=[np.number]).columns.tolist()
+        dl_cat_cols = X_eng.select_dtypes(include=["object", "category"]).columns.tolist()
+        
+        self.num_cols_count_ = len(dl_numeric_cols)
+        self.cat_cols_count_ = len(dl_cat_cols)
+        
+        # Pipeline: Impute -> Log -> Scale
+        dl_numeric_transformer = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("log", FunctionTransformer(func=_safe_log1p, validate=False)), 
+            ("scaler", StandardScaler()),
+        ])
+
+        # Pipeline: Impute -> Ordinal Encode
+        dl_categorical_transformer = Pipeline([
+            ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+            ("ordinal", OrdinalEncoder(
+                handle_unknown="use_encoded_value", unknown_value=-1
+            )),
+        ])
+
+        self.dl_preprocessor_ = ColumnTransformer([
+            ("num", dl_numeric_transformer, dl_numeric_cols),
+            ("cat", dl_categorical_transformer, dl_cat_cols),
+        ])
+        
+        self.dl_preprocessor_.fit(X_eng)
+        return self
+
+    def transform(self, X):
+        # 1. Re-run all engineering steps
+        X_eng = self._feature_engineer_transform(X)
+        
+        # 2. Scale/Encode to Matrix
+        X_trans = self.dl_preprocessor_.transform(X_eng)
+        
+        if hasattr(X_trans, "toarray"):
+            X_trans = X_trans.toarray()
+            
+        # 3. Shift Categoricals (+1) for Embeddings
+        # (Converts -1 to 0, 0 to 1, etc.)
+        if self.cat_cols_count_ > 0:
+            X_trans[:, self.num_cols_count_:] += 1
+            
+        return X_trans.astype(np.float32)
+
+    def _feature_engineer_transform(self, X):
+        X = X.copy()
+        
+        # 1. Drop Columns
+        X.drop(columns=self.cols_to_drop_, errors='ignore', inplace=True)
+        if "next_payment_date" in X.columns:
+            X.drop(columns=["next_payment_date"], inplace=True)
+        if "loan_purpose_category" in X.columns:
+            X.drop(columns=["loan_purpose_category"], inplace=True)
+
+        # 2. Months Since (Handle -1)
+        months_cols = [
+            "months_since_last_delinquency", 
+            "months_since_recent_revolving_delinquency",
+            "months_since_last_major_derog",
+            "months_since_recent_bankcard_delinquency"
+        ]
+        for col in months_cols:
+            if col in X.columns:
+                X[f"{col}_ever"] = X[col].notna().astype(float)
+                X[col] = X[col].fillna(-1) 
+
+        # 3. Loan Contract Term (Clean & Impute)
+        if "loan_contract_term_months" in X.columns:
+            X["loan_contract_term_months"] = pd.to_numeric(
+                X["loan_contract_term_months"].str.replace(" months", ""),
+                errors="coerce"
+            )
+            if "loan_contract_term_months" in self.modes_:
+                X["loan_contract_term_months"] = X["loan_contract_term_months"].fillna(
+                    self.modes_["loan_contract_term_months"]
+                )
+
+        # 4. Employment Length (Clean & Impute)
+        if "borrower_profile_employment_length" in X.columns:
+            X["borrower_profile_employment_length"] = X["borrower_profile_employment_length"].replace(
+                {"< 1 year": "0 years", "10+ years": "10 years"}
+            ).str.extract(r"(\d+)").astype(float)
+            if "borrower_profile_employment_length" in self.medians_:
+                 X["borrower_profile_employment_length"] = X["borrower_profile_employment_length"].fillna(
+                     self.medians_["borrower_profile_employment_length"]
+                 )
+
+        # 5. Dates & Cyclical Features
+        date_cols = ["loan_issue_date", "credit_history_earliest_line", "last_payment_date", "last_credit_pull_date"]
+        ref_date = pd.Timestamp("2020-01-01")
+        
+        # Credit History Length
+        if {"loan_issue_date", "credit_history_earliest_line"}.issubset(X.columns):
+            d1 = pd.to_datetime(X["loan_issue_date"], format="%b-%Y", errors='coerce')
+            d2 = pd.to_datetime(X["credit_history_earliest_line"], format="%b-%Y", errors='coerce')
+            X["credit_history_length_months"] = (d1 - d2).dt.days / 30
+
+        for col in date_cols:
+            if col in X.columns:
+                X[col] = pd.to_datetime(X[col], format="%b-%Y", errors='coerce')
+                X[f"{col}_year"] = X[col].dt.year
+                month = X[col].dt.month
+                X[f"{col}_month_sin"] = np.sin(2 * np.pi * month / 12)
+                X[f"{col}_month_cos"] = np.cos(2 * np.pi * month / 12)
+                X[f"{col}_quarter"] = X[col].dt.quarter
+                X[f"{col}_days_since_ref"] = (X[col] - ref_date).dt.days
+                X.drop(columns=[col], inplace=True)
+
+        # 6. Loan Title NLP
+        if "loan_title" in X.columns:
+            X = self.loan_title_proc_.transform(X)
+
+        # 7. State Features (Region, Tax, Freq)
+        if "borrower_address_state" in X.columns:
+            X["borrower_address_state"] = X["borrower_address_state"].fillna("unknown")
+            X["state_region"] = X["borrower_address_state"].apply(_get_state_region)
+            X["state_no_income_tax"] = X["borrower_address_state"].str.lower().isin(_NO_INCOME_TAX_STATES).astype(float)
+            if self.state_counts_ is not None:
+                X["state_log_frequency"] = np.log1p(X["borrower_address_state"].map(self.state_counts_))
+
+        # 8. Zip Features (Region, Freq)
+        if "borrower_address_zip" in X.columns:
+            X["borrower_address_zip"] = X["borrower_address_zip"].fillna("unknown")
+            zip3 = X["borrower_address_zip"].astype(str).str[:3]
+            X["zip3_prefix"] = zip3 # Add this column explicitly like ML class does
+            X["zip_region"] = X["borrower_address_zip"].apply(_get_zip_region)
+            if self.zip_counts_ is not None:
+                X["zip_log_frequency"] = np.log1p(zip3.map(self.zip_counts_))
+            X.drop(columns=["borrower_address_zip"], inplace=True)
+
+        # 9. Loan Status Mapping
+        if "loan_status_current_code" in X.columns:
+             X["loan_status_current_code"] = X["loan_status_current_code"].replace(_STATUS_MAP).map(_RISK_ORDER)
+             if "loan_status_current_code" in self.medians_:
+                 X["loan_status_current_code"] = X["loan_status_current_code"].fillna(self.medians_["loan_status_current_code"])
+
+        # 10. Housing & Income Verification
+        if "borrower_housing_ownership_status" in X.columns:
+            X["borrower_housing_ownership_status"] = X["borrower_housing_ownership_status"].replace(
+                {"none": "other", "any": "other"}
+            ).fillna("other")
+            
+        if "borrower_income_verification_status" in X.columns:
+             X["borrower_income_verification_status"] = X["borrower_income_verification_status"].fillna("not verified")
+             
+        # 11. Final Clean-up for Inner Transformer
+        cat_cols = X.select_dtypes(include=["object", "category"]).columns
+        for col in cat_cols:
+            if X[col].isna().any():
+                X[col] = X[col].fillna("missing")
+        
+        int_cols = X.select_dtypes(include=["int64"]).columns
+        X[int_cols] = X[int_cols].astype(float)
+
+        return X
+
+
+    def get_metadata(self):
+        """
+        Returns metadata needed for TabNet and TabTransformer.
+        Must be called AFTER fit().
+        """
+        if self.dl_preprocessor_ is None:
+            raise ValueError("Preprocessor is not fitted yet.")
+
+        # 1. Get counts
+        n_num = self.num_cols_count_
+        n_cat = self.cat_cols_count_
+        
+        # 2. Get Categorical Indices (They are always at the end due to ColumnTransformer order)
+        # The output array is [Numerical Features ... | Categorical Features ...]
+        cat_indices = list(range(n_num, n_num + n_cat))
+        
+        # 3. Get Cardinalities (Vocab Size)
+        # We access the fitted OrdinalEncoder to see how many categories it learned.
+        # We add +1 because we shift everything by 1 to reserve index 0 for "Unknown"
+        cat_cardinalities = []
+        
+        # Access the 'cat' pipeline -> 'ordinal' step
+        ordinal_encoder = self.dl_preprocessor_.named_transformers_["cat"].named_steps["ordinal"]
+        
+        for categories in ordinal_encoder.categories_:
+            # len(categories) is the number of known classes (e.g., 3 for Rent/Own/Mortgage)
+            # We add 1 for the "Unknown" / Padding class at index 0.
+            cat_cardinalities.append(len(categories) + 1)
+            
+        return {
+            "num_num_cols": n_num,
+            "num_cat_cols": n_cat,
+            "cat_indices": cat_indices,
+            "cat_cardinalities": cat_cardinalities,
+            # Since we use StandardScaler, mean is 0 and std is 1 for the model input
+            "cont_mean_std": np.array([[0.0, 1.0]] * n_num) 
+        }

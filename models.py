@@ -751,3 +751,29 @@ def create_loaders(
     if test_dataset is not None:
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, val_loader, test_loader
+
+
+# data_processing.py
+
+class TabTransformerInferenceWrapper(nn.Module):
+    """
+    Wraps a TabTransformer so it accepts a single Tensor [batch, n_features],
+    splits it internally, and calls the underlying model.
+    """
+    def __init__(self, model, num_numeric_features):
+        super().__init__()
+        self.model = model
+        self.n_num = num_numeric_features
+
+    def forward(self, x):
+        # x is shape [batch, n_num + n_cat]
+        
+        # 1. Split Numeric (Float32)
+        x_num = x[:, :self.n_num]
+        
+        # 2. Split Categorical (Must be Long/Int64 for embeddings)
+        # We cast to .long() because test.py sends everything as floats
+        x_cat = x[:, self.n_num:].long() 
+        
+        # 3. Call original model
+        return self.model(x_cat, x_num)
