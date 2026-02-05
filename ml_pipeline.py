@@ -341,7 +341,7 @@ def train_lr(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=S
         ("classifier", LogisticRegression(
             class_weight="balanced",
             random_state=seed,
-            max_iter=2000, 
+            max_iter=1000, 
             n_jobs=-1    
         ))
     ])
@@ -360,7 +360,7 @@ def train_lr(X, y, feature_engineer, preprocessor, param_grid=None, cv=3, seed=S
         scoring=SCORING_METRICS,
         refit="f1_macro",
         n_jobs=-1,
-        verbose=1
+        verbose=2
     )
 
     print("Starting Logistic Regression GridSearch...")

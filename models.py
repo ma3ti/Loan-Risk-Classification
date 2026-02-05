@@ -21,6 +21,10 @@ from typing import Dict, List, Optional, Tuple
 
 import pickle
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,7 +37,10 @@ from sklearn.metrics import (
 )
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
+
+from pytorch_tabnet.tab_model import TabNetClassifier
+from tab_transformer_pytorch import TabTransformer
+
 
 from config import DEVICE, MODEL_DIR, SEED
 
@@ -43,7 +50,6 @@ from config import DEVICE, MODEL_DIR, SEED
 
 class LoanDataset(Dataset):
     """Generic tabular dataset: all features as a single float tensor."""
-
     def __init__(self, X: np.ndarray, y: np.ndarray):
         self.X = torch.FloatTensor(X)
         self.y = torch.LongTensor(y)
@@ -73,7 +79,6 @@ class TabularDataset(Dataset):
     Dataset that returns (x_num, x_cat, y) as separate tensors.
     Used by TabTransformer which needs categorical inputs as LongTensor.
     """
-
     def __init__(self, X: np.ndarray, y: np.ndarray, n_num: int):
         """
         Parameters
@@ -119,7 +124,7 @@ class TabularDataset(Dataset):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 2.  FFNN MODEL
+# FFNN MODEL
 # ══════════════════════════════════════════════════════════════════════════════
 
 class LoanClassifierFFNN(nn.Module):
@@ -128,14 +133,7 @@ class LoanClassifierFFNN(nn.Module):
 
     Architecture: Linear -> LayerNorm -> LeakyReLU -> Dropout  (repeated)
     """
-
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        hidden_units: List[int] = [256, 128, 64],
-        dropout_rates: List[float] = [0.3, 0.05],
-    ):
+    def __init__(self, input_dim: int, output_dim: int, hidden_units: List[int] = [256, 128, 64], dropout_rates: List[float] = [0.3, 0.05]):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -170,7 +168,7 @@ class LoanClassifierFFNN(nn.Module):
         return self.out(x)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 3.  TABNET BUILDER
+# TABNET BUILDER
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_tabnet_classifier(
@@ -201,8 +199,6 @@ def build_tabnet_classifier(
     Fit it later with:
         tabnet_model.fit(X_train=..., y_train=..., eval_set=..., ...)
     """
-    from pytorch_tabnet.tab_model import TabNetClassifier
-
     device_name = str(device)
 
     model = TabNetClassifier(
@@ -272,7 +268,7 @@ def train_tabnet(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4.  TAB TRANSFORMER BUILDER
+# TAB TRANSFORMER BUILDER
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_tab_transformer(
@@ -295,7 +291,6 @@ def build_tab_transformer(
 
     Returns the model moved to `device`.
     """
-    from tab_transformer_pytorch import TabTransformer
 
     if mlp_act is None:
         mlp_act = nn.ReLU()
@@ -320,52 +315,7 @@ def build_tab_transformer(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4b. FT-TRANSFORMER BUILDER (attention over ALL features)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def build_ft_transformer(
-    cat_cardinalities: Tuple[int, ...],
-    num_continuous: int,
-    num_classes: int = 7,
-    # Architecture
-    dim: int = 64,
-    depth: int = 4,
-    heads: int = 8,
-    attn_dropout: float = 0.1,
-    ff_dropout: float = 0.1,
-    device: torch.device = DEVICE,
-):
-    """
-    Build an FTTransformer (Feature Tokenizer Transformer) using the
-    `tab_transformer_pytorch` library.
-
-    Unlike TabTransformer, FTTransformer tokenizes ALL features (numerical
-    AND categorical) into embeddings, then applies self-attention across
-    all of them.  This is much better suited for datasets with many
-    numerical features.
-
-    Same forward interface as TabTransformer: model(x_categ, x_numer) -> logits.
-
-    Returns the model moved to `device`.
-    """
-    from tab_transformer_pytorch import FTTransformer
-
-    model = FTTransformer(
-        categories=tuple(cat_cardinalities),
-        num_continuous=num_continuous,
-        dim=dim,
-        dim_out=num_classes,
-        depth=depth,
-        heads=heads,
-        attn_dropout=attn_dropout,
-        ff_dropout=ff_dropout,
-    ).to(device)
-
-    return model
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 5.  GENERIC TRAINING LOOP (for FFNN, TabTransformer & FTTransformer)
+# GENERIC TRAINING LOOP (for FFNN, TabTransformer)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _run_epoch_standard(model, loader, criterion, optimizer, device, is_train=True, max_grad_norm=None):
@@ -460,14 +410,14 @@ def train_model(
     -------
     model, train_losses, val_losses
     """
-    # 1. Setup Criterion
+    # Setup Criterion
     if class_weights is not None:
         w = torch.tensor(class_weights, dtype=torch.float32).to(device)
         criterion = nn.CrossEntropyLoss(weight=w)
     else:
         criterion = nn.CrossEntropyLoss()
 
-    # 2. Setup Optimizer & Scheduler
+    # Setup Optimizer & Scheduler
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
     )
@@ -488,7 +438,7 @@ def train_model(
             total_iters=warmup_epochs,
         )
 
-    # 3. Helper to run one epoch
+    # Helper to run one epoch
     run_epoch = (
         _run_epoch_tab_transformer if model_type == "tab_transformer"
         else _run_epoch_standard
@@ -499,7 +449,7 @@ def train_model(
     train_losses, val_losses = [], []
     save_path = os.path.join(MODEL_DIR, save_name)
 
-    # 4. Training Loop
+    # Training Loop
     for ep in range(1, num_epochs + 1):
         t_loss = run_epoch(model, train_loader, criterion, optimizer, device, is_train=True, max_grad_norm=max_grad_norm)
         v_loss = run_epoch(model, val_loader, criterion, None, device, is_train=False)
@@ -515,20 +465,19 @@ def train_model(
         else:
             main_scheduler.step(v_loss)
 
-        # 5. Save Logic (The important part!)
+        # Save Logic (The important part!)
         if v_loss < best_val_loss:
             best_val_loss = v_loss
             counter = 0
             
-            # --- CRITICAL STEP FOR PICKLE ---
-            # 1. Move model to CPU (so pickle is portable)
+            # Move model to CPU (so pickle is portable)
             model.cpu()
             
-            # 2. Pickle the object
+            # Pickle the object
             with open(save_path, "wb") as f:
                 pickle.dump(model, f)
             
-            # 3. Move back to Device (to continue training loop)
+            # Move back to Device (to continue training loop)
             model.to(device)
             
         else:
@@ -546,7 +495,7 @@ def train_model(
             print(f"Early stopping at epoch {ep}")
             break
 
-    # 6. Load Best Model (using Standard Pickle)
+    # Load Best Model (using Standard Pickle)
     with open(save_path, "rb") as f:
         model = pickle.load(f)
     
@@ -557,7 +506,7 @@ def train_model(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6.  EVALUATION
+# EVALUATION
 # ══════════════════════════════════════════════════════════════════════════════
 
 @torch.no_grad()
@@ -637,12 +586,11 @@ def evaluate_model(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 7.  PLOTTING
+# PLOTTING
 # ══════════════════════════════════════════════════════════════════════════════
 
 def plot_losses(train_losses, val_losses, title="Training vs Validation Loss", save_path=None):
     """Plot train/val loss curves."""
-    import matplotlib.pyplot as plt
 
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label="Training Loss")
@@ -661,8 +609,6 @@ def plot_losses(train_losses, val_losses, title="Training vs Validation Loss", s
 
 def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Matrix", save_path=None):
     """Plot a confusion matrix heatmap."""
-    import matplotlib.pyplot as plt
-    import seaborn as sns
 
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(10, 8))
@@ -680,13 +626,7 @@ def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Mat
     plt.show()
 
 
-def plot_feature_importances(
-    importances: np.ndarray,
-    feature_names: list,
-    top_k: int = 20,
-    title: str = "Feature Importances",
-    save_path: str = None,
-):
+def plot_feature_importances(importances: np.ndarray, feature_names: list, top_k: int = 20, title: str = "Feature Importances", save_path: str = None):
     """
     Plot top-k feature importances with actual feature names.
 
@@ -698,7 +638,6 @@ def plot_feature_importances(
     title         : plot title.
     save_path     : if set, save the figure to this path.
     """
-    import matplotlib.pyplot as plt
 
     assert len(importances) == len(feature_names), (
         f"importances ({len(importances)}) and feature_names "
@@ -723,7 +662,7 @@ def plot_feature_importances(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 8.  UTILITIES
+# UTILITIES
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_class_weights(y_train: np.ndarray) -> np.ndarray:
@@ -738,12 +677,7 @@ def get_class_weights_dict(y_train: np.ndarray) -> dict:
     return {i: w for i, w in enumerate(cw)}
 
 
-def create_loaders(
-    train_dataset,
-    val_dataset,
-    test_dataset=None,
-    batch_size: int = 256,
-):
+def create_loaders(train_dataset, val_dataset, test_dataset=None, batch_size: int = 256):
     """Create DataLoaders from Datasets."""
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -752,8 +686,6 @@ def create_loaders(
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, val_loader, test_loader
 
-
-# data_processing.py
 
 class TabTransformerInferenceWrapper(nn.Module):
     """
@@ -768,12 +700,12 @@ class TabTransformerInferenceWrapper(nn.Module):
     def forward(self, x):
         # x is shape [batch, n_num + n_cat]
         
-        # 1. Split Numeric (Float32)
+        # Split Numeric (Float32)
         x_num = x[:, :self.n_num]
         
-        # 2. Split Categorical (Must be Long/Int64 for embeddings)
+        # Split Categorical (Must be Long/Int64 for embeddings)
         # We cast to .long() because test.py sends everything as floats
         x_cat = x[:, self.n_num:].long() 
         
-        # 3. Call original model
+        # Call original model
         return self.model(x_cat, x_num)

@@ -1,4 +1,26 @@
 ==================================================
+  Logistic Regression — Best GridSearch Results
+==================================================
+  Best Params: {'classifier__C': 1, 'classifier__max_iter': 1000, 'classifier__penalty': 'l2', 'classifier__solver': 'lbfgs', 'preprocessor__scaler': RobustScaler()}
+
+  accuracy                 : 0.8514 ± 0.0026
+  balanced_accuracy        : 0.8080 ± 0.0038
+  f1_weighted              : 0.8517 ± 0.0025
+  f1_macro                 : 0.8001 ± 0.0038
+
+
+==================================================
+  Random Forest — Best GridSearch Results
+==================================================
+  Best Params: {'classifier__max_depth': None, 'classifier__max_features': 0.3, 'classifier__min_samples_leaf': 1, 'classifier__min_samples_split': 8, 'classifier__n_estimators': 300}
+
+  accuracy                 : 0.9651 ± 0.0010
+  balanced_accuracy        : 0.9550 ± 0.0016
+  f1_weighted              : 0.9651 ± 0.0010
+  f1_macro                 : 0.9566 ± 0.0017
+
+
+==================================================
   KNN — Best GridSearch Results
 ==================================================
   Best Params: {'classifier__n_neighbors': 30, 'classifier__p': 2, 'classifier__weights': 'distance', 'pca__n_components': 30, 'preprocessor__scaler': StandardScaler()}
