@@ -3,13 +3,6 @@ data_processing.py
 -------------------
 All feature engineering and preprocessing logic.
 
-Public API used from the notebook:
-    load_data(path)                -> DataFrame
-    feature_engineer(X, y)         -> X_engineered, column_lists_dict
-    build_ml_preprocessor(cols)    -> preprocessor, global_scaler
-    build_dl_preprocessor(cols)    -> dl_preprocessor
-    prepare_ml_data(path)          -> X, y, preprocessor, global_scaler
-    prepare_dl_data(path, ...)     -> dict with splits, encoders, metadata
 """
 
 import numpy as np
@@ -474,7 +467,7 @@ def prepare_ml_data(path: str = TRAIN_CSV):
     return X, y, FeatureEngineer(), build_dynamic_preprocessor(), le
 
 
-# Helper function
+# Helper function in dl models processing data
 def _safe_log1p(X):
     """
     Applies log1p safely by clipping negative values to 0 first.
@@ -618,7 +611,7 @@ class FFNNPreprocessor(BaseEstimator, TransformerMixin):
         if "loan_purpose_category" in X.columns:
             X.drop(columns=["loan_purpose_category"], inplace=True)
 
-        # Months Since (Handle -1)
+        # Months Since cols kept + add "_ever" binary feature 
         months_cols = [
             "months_since_last_delinquency", 
             "months_since_recent_revolving_delinquency",
@@ -659,8 +652,10 @@ class FFNNPreprocessor(BaseEstimator, TransformerMixin):
         if {"loan_issue_date", "credit_history_earliest_line"}.issubset(X.columns):
             d1 = pd.to_datetime(X["loan_issue_date"], format="%b-%Y", errors='coerce')
             d2 = pd.to_datetime(X["credit_history_earliest_line"], format="%b-%Y", errors='coerce')
+            # Created new feature
             X["credit_history_length_months"] = (d1 - d2).dt.days / 30
 
+        # Create Cyclical Features & Drop Originals
         for col in date_cols:
             if col in X.columns:
                 X[col] = pd.to_datetime(X[col], format="%b-%Y", errors='coerce')
@@ -688,7 +683,7 @@ class FFNNPreprocessor(BaseEstimator, TransformerMixin):
         if "borrower_address_zip" in X.columns:
             X["borrower_address_zip"] = X["borrower_address_zip"].fillna("unknown")
             zip3 = X["borrower_address_zip"].astype(str).str[:3]
-            X["zip3_prefix"] = zip3 # Add this column explicitly like ML class does
+            X["zip3_prefix"] = zip3 
             X["zip_region"] = X["borrower_address_zip"].apply(_get_zip_region)
             if self.zip_counts_ is not None:
                 X["zip_log_frequency"] = np.log1p(zip3.map(self.zip_counts_))
@@ -696,6 +691,7 @@ class FFNNPreprocessor(BaseEstimator, TransformerMixin):
 
         # Loan Status Mapping
         if "loan_status_current_code" in X.columns:
+             # Map to risk ordinal order to integers
              X["loan_status_current_code"] = X["loan_status_current_code"].replace(_STATUS_MAP).map(_RISK_ORDER)
              if "loan_status_current_code" in self.medians_:
                  X["loan_status_current_code"] = X["loan_status_current_code"].fillna(self.medians_["loan_status_current_code"])
@@ -733,21 +729,14 @@ class FFNNPreprocessor(BaseEstimator, TransformerMixin):
         n_num = self.num_cols_count_
         n_cat = self.cat_cols_count_
         
-        # Get Categorical Indices (They are always at the end due to ColumnTransformer order)
-        # The output array is [Numerical Features ... | Categorical Features ...]
         cat_indices = list(range(n_num, n_num + n_cat))
         
         # Get Cardinalities (Vocab Size)
-        # We access the fitted OrdinalEncoder to see how many categories it learned.
-        # We add +1 because we shift everything by 1 to reserve index 0 for "Unknown"
+        # access the fitted OrdinalEncoder to see how many categories it learned.
+        # add +1 because we shift everything by 1 to reserve index 0 for "Unknown"
         cat_cardinalities = []
-        
-        # Access the 'cat' pipeline -> 'ordinal' step
         ordinal_encoder = self.dl_preprocessor_.named_transformers_["cat"].named_steps["ordinal"]
-        
         for categories in ordinal_encoder.categories_:
-            # len(categories) is the number of known classes (e.g., 3 for Rent/Own/Mortgage)
-            # We add 1 for the "Unknown" / Padding class at index 0.
             cat_cardinalities.append(len(categories) + 1)
             
         return {
@@ -755,6 +744,6 @@ class FFNNPreprocessor(BaseEstimator, TransformerMixin):
             "num_cat_cols": n_cat,
             "cat_indices": cat_indices,
             "cat_cardinalities": cat_cardinalities,
-            # Since we use StandardScaler, mean is 0 and std is 1 for the model input
+            # Since I use StandardScaler, mean is 0 and std is 1 for the model input
             "cont_mean_std": np.array([[0.0, 1.0]] * n_num) 
         }

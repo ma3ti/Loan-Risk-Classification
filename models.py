@@ -48,30 +48,78 @@ from config import DEVICE, MODEL_DIR, SEED
 # 1.  DATASETS
 # ══════════════════════════════════════════════════════════════════════════════
 
-class LoanDataset(Dataset):
-    """Generic tabular dataset: all features as a single float tensor."""
-    def __init__(self, X: np.ndarray, y: np.ndarray):
-        self.X = torch.FloatTensor(X)
-        self.y = torch.LongTensor(y)
-        self.num_features = X.shape[1]
-        self.num_classes = len(np.unique(y))
+# class LoanDataset(Dataset):
+#     """Generic tabular dataset: all features as a single float tensor."""
+#     def __init__(self, X: np.ndarray, y: np.ndarray):
+#         self.X = torch.FloatTensor(X)
+#         self.y = torch.LongTensor(y)
+#         self.num_features = X.shape[1]
+#         self.num_classes = len(np.unique(y))
 
-        # Validate labels are in [0, num_classes) — an out-of-range label
-        # causes a silent CUDA kernel error that surfaces later as
-        # "device-side assert triggered" (often inside fix_random or
-        # an unrelated call).
-        y_min, y_max = int(self.y.min()), int(self.y.max())
+#         # Validate labels are in [0, num_classes) — an out-of-range label
+#         # causes a silent CUDA kernel error that surfaces later as
+#         # "device-side assert triggered" (often inside fix_random or
+#         # an unrelated call).
+#         y_min, y_max = int(self.y.min()), int(self.y.max())
+#         assert y_min >= 0 and y_max < self.num_classes, (
+#             f"Labels out of range: min={y_min}, max={y_max}, "
+#             f"num_classes={self.num_classes}.  "
+#             f"Check your LabelEncoder / target encoding."
+#         )
+
+#     def __len__(self):
+#         return len(self.y)
+
+#     def __getitem__(self, idx):
+#         return self.X[idx], self.y[idx]
+
+
+class LoanDataset(Dataset):
+    """
+    Tabular dataset that splits input into Numerical (Float) and Categorical (Long) tensors.
+    Required for models using Entity Embeddings.
+    """
+    def __init__(self, X: np.ndarray, y: np.ndarray, num_num_cols: int):
+        """
+        Args:
+            X: The full transformed array (float32).
+               Cols [0 : num_num_cols] are Numerical.
+               Cols [num_num_cols : end] are Categorical.
+            y: Target array.
+            num_num_cols: Integer count of numerical columns (split point).
+        """
+        # 1. Validation Logic (Preserved from your original code)
+        self.num_classes = len(np.unique(y))
+        y_min, y_max = int(y.min()), int(y.max())
         assert y_min >= 0 and y_max < self.num_classes, (
             f"Labels out of range: min={y_min}, max={y_max}, "
-            f"num_classes={self.num_classes}.  "
+            f"num_classes={self.num_classes}. "
             f"Check your LabelEncoder / target encoding."
         )
+
+        # 2. Store Targets
+        self.y = torch.LongTensor(y)
+
+        # 3. Split & Convert X
+        # Numerical features stay as Floats
+        self.x_num = torch.FloatTensor(X[:, :num_num_cols])
+        
+        # Categorical features must be converted to Long (Integers) for Embedding lookups
+        self.x_cat = torch.LongTensor(X[:, num_num_cols:])
+        
+        # Save dimensions for reference
+        self.num_features = X.shape[1]
+        self.num_numerical = self.x_num.shape[1]
+        self.num_categorical = self.x_cat.shape[1]
 
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        # Returns Tuple: (Numerics, Categoricals, Target)
+        return self.x_num[idx], self.x_cat[idx], self.y[idx]
+
+
 
 
 class TabularDataset(Dataset):
@@ -127,44 +175,87 @@ class TabularDataset(Dataset):
 # FFNN MODEL
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class LoanClassifierFFNN(nn.Module):
     """
-    Feed-Forward Neural Network for tabular classification.
-
-    Architecture: Linear -> LayerNorm -> LeakyReLU -> Dropout  (repeated)
+    FFNN with Entity Embeddings for Tabular Data.
+    Structure: [Embeddings + Numerics] -> Linear -> LayerNorm -> LeakyReLU -> Dropout
     """
-    def __init__(self, input_dim: int, output_dim: int, hidden_units: List[int] = [256, 128, 64], dropout_rates: List[float] = [0.3, 0.05]):
+    def __init__(
+        self, 
+        num_numerical_cols: int, 
+        cat_cardinalities: List[int], # From preprocessor.get_metadata()
+        output_dim: int, 
+        hidden_units: List[int] = [256, 128, 64], 
+        dropout_rates: List[float] = [0.3, 0.05]
+    ):
         super().__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-
-        # Dropout: first rate for early layers, second for later layers
+        
+        # Embedding Layers ---
+        self.embeddings = nn.ModuleList()
+        total_emb_dim = 0
+        
+        for num_cats in cat_cardinalities:
+            # how to choose embedding size: min(50, (x+1)/2)
+            emb_dim = min(50, (num_cats + 1) // 2)
+            self.embeddings.append(nn.Embedding(num_cats, emb_dim))
+            total_emb_dim += emb_dim
+            
+        # Main Network ---
+        # Input dimension is now: Numerics + All Embedding Vectors
+        self.input_dim = num_numerical_cols + total_emb_dim
+        
         d1 = dropout_rates[0] if len(dropout_rates) > 0 else 0.3
         d2 = dropout_rates[1] if len(dropout_rates) > 1 else d1
 
-        self.fc1 = nn.Linear(input_dim, hidden_units[0])
+        # Layer 1
+        self.fc1 = nn.Linear(self.input_dim, hidden_units[0])
         self.ln1 = nn.LayerNorm(hidden_units[0])
         self.drop1 = nn.Dropout(d1)
 
+        # Layer 2
         self.fc2 = nn.Linear(hidden_units[0], hidden_units[1])
         self.ln2 = nn.LayerNorm(hidden_units[1])
         self.drop2 = nn.Dropout(d1)
-
+        
+        # Layer 3
         self.fc3 = nn.Linear(hidden_units[1], hidden_units[1])
         self.ln3 = nn.LayerNorm(hidden_units[1])
         self.drop3 = nn.Dropout(d1)
 
+        # Layer 4
         self.fc4 = nn.Linear(hidden_units[1], hidden_units[2])
         self.ln4 = nn.LayerNorm(hidden_units[2])
         self.drop4 = nn.Dropout(d2)
 
+        # Output
         self.out = nn.Linear(hidden_units[2], output_dim)
 
-    def forward(self, x):
+    def forward(self, x_num, x_cat):
+        """
+        x_num: Tensor of shape (Batch, Num_Numerics) -> float32
+        x_cat: Tensor of shape (Batch, Num_Categoricals) -> long (int)
+        """
+        
+        # Process Embeddings
+        emb_outputs = []
+        for i, emb_layer in enumerate(self.embeddings):
+            # Extract the i-th categorical column
+            col_data = x_cat[:, i] 
+            emb_outputs.append(emb_layer(col_data))
+            
+        # Concatenate all embeddings -> Shape: (Batch, Total_Emb_Dim)
+        x_cat_emb = torch.cat(emb_outputs, dim=1)
+        
+        # Concatenate with Numerics
+        x = torch.cat([x_num, x_cat_emb], dim=1)
+        
+        # Feed Forward
         x = self.drop1(F.leaky_relu(self.ln1(self.fc1(x))))
         x = self.drop2(F.leaky_relu(self.ln2(self.fc2(x))))
         x = self.drop3(F.leaky_relu(self.ln3(self.fc3(x))))
         x = self.drop4(F.leaky_relu(self.ln4(self.fc4(x))))
+        
         return self.out(x)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -318,33 +409,6 @@ def build_tab_transformer(
 # GENERIC TRAINING LOOP (for FFNN, TabTransformer)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_epoch_standard(model, loader, criterion, optimizer, device, is_train=True, max_grad_norm=None):
-    """One epoch for models that take a single (X, y) input."""
-    if is_train:
-        model.train()
-    else:
-        model.eval()
-
-    total_loss = 0.0
-    ctx = torch.no_grad() if not is_train else torch.enable_grad()
-
-    with ctx:
-        for data, targets in loader:
-            data, targets = data.to(device), targets.to(device)
-            if is_train:
-                optimizer.zero_grad()
-            outputs = model(data)
-            loss = criterion(outputs, targets)
-            if is_train:
-                loss.backward()
-                if max_grad_norm is not None:
-                    nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-                optimizer.step()
-            total_loss += loss.item()
-
-    return total_loss / len(loader)
-
-
 def _run_epoch_tab_transformer(model, loader, criterion, optimizer, device, is_train=True, max_grad_norm=None):
     """One epoch for TabTransformer that takes (x_num, x_cat, y)."""
     if is_train:
@@ -374,6 +438,50 @@ def _run_epoch_tab_transformer(model, loader, criterion, optimizer, device, is_t
     return total_loss / len(loader)
 
 
+def _run_epoch_fn(model, loader, criterion, optimizer, device, is_train=True, max_grad_norm=None):
+    """
+    Helper for models that take separate (x_num, x_cat) inputs.
+    """
+    if is_train:
+        model.train()
+    else:
+        model.eval()
+
+    running_loss = 0.0
+    
+    for batch in loader:
+        # 1. Unpack 3 items (Matches your new LoanDataset)
+        x_num, x_cat, y = batch
+        
+        # 2. Move to Device
+        x_num = x_num.to(device)
+        x_cat = x_cat.to(device)
+        y = y.to(device)
+
+        # 3. Forward Pass
+        if is_train:
+            optimizer.zero_grad()
+            # Pass both inputs separately
+            outputs = model(x_num, x_cat) 
+            loss = criterion(outputs, y)
+            
+            loss.backward()
+            
+            if max_grad_norm:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                
+            optimizer.step()
+        else:
+            with torch.no_grad():
+                outputs = model(x_num, x_cat)
+                loss = criterion(outputs, y)
+
+        running_loss += loss.item() * y.size(0)
+
+    return running_loss / len(loader.dataset)
+
+
+
 def train_model(
     model: nn.Module,
     train_loader: DataLoader,
@@ -386,8 +494,8 @@ def train_model(
     scheduler_factor: float = 0.3,
     class_weights: Optional[np.ndarray] = None,
     device: torch.device = DEVICE,
-    save_name: str = "best_model.pkl",
-    model_type: str = "standard",  # "standard" or "tab_transformer"
+    save_name: str = "ff.pkl",
+    model_type: str = "ff",  # "ff" or "tab_transformer"
     max_grad_norm: Optional[float] = None,  # gradient clipping (e.g. 1.0)
     use_cosine_scheduler: bool = False,  # True = CosineAnnealingLR
     warmup_epochs: int = 0,  # linear warmup
@@ -397,7 +505,7 @@ def train_model(
 
     Parameters
     ----------
-    model_type : "standard"  – model(X)  -> logits  (FFNN)
+    model_type : "ff"  – model(X)  -> logits  (FFNN)
                  "tab_transformer" – model(x_cat, x_num) -> logits
     class_weights : array of per-class weights, or None.
     max_grad_norm : if set, clip gradient norms to this value each step.
@@ -438,10 +546,10 @@ def train_model(
             total_iters=warmup_epochs,
         )
 
-    # Helper to run one epoch
+    #Helper to run one epoch
     run_epoch = (
         _run_epoch_tab_transformer if model_type == "tab_transformer"
-        else _run_epoch_standard
+        else _run_epoch_fn
     )
 
     best_val_loss = float("inf")
@@ -509,24 +617,67 @@ def train_model(
 # EVALUATION
 # ══════════════════════════════════════════════════════════════════════════════
 
+# @torch.no_grad()
+# def predict(model, loader, device=DEVICE, model_type="ff"):
+#     """
+#     Run inference on a DataLoader.
+
+#     Returns
+#     -------
+#     y_true, y_pred, y_logits  (all numpy arrays)
+#     """
+#     model.eval()
+#     all_true, all_pred, all_logits = [], [], []
+
+#     for batch in loader:
+#         if model_type == "tab_transformer":
+#             x_num, x_cat, targets = batch
+#             x_num, x_cat = x_num.to(device), x_cat.to(device)
+#             outputs = model(x_cat, x_num)
+#         else:
+#             data, targets = batch
+#             data = data.to(device)
+#             outputs = model(data)
+
+#         _, predicted = torch.max(outputs, 1)
+#         all_true.append(targets.cpu().numpy())
+#         all_pred.append(predicted.cpu().numpy())
+#         all_logits.append(outputs.cpu().numpy())
+
+#     return (
+#         np.concatenate(all_true),
+#         np.concatenate(all_pred),
+#         np.concatenate(all_logits),
+#     )
+
+
 @torch.no_grad()
-def predict(model, loader, device=DEVICE, model_type="standard"):
+def predict(model, loader, device=DEVICE, model_type="ff"):
     """
     Run inference on a DataLoader.
-
-    Returns
-    -------
-    y_true, y_pred, y_logits  (all numpy arrays)
+    Compatible with:
+      - FFNN (x_num, x_cat, y) -> model(x_num, x_cat)
+      - TabTransformer (x_num, x_cat, y) -> model(x_cat, x_num)
     """
     model.eval()
     all_true, all_pred, all_logits = [], [], []
 
     for batch in loader:
-        if model_type == "tab_transformer":
+        # Check if the batch has 3 items (Dual Input) or 2 items (Standard)
+        if len(batch) == 3:
             x_num, x_cat, targets = batch
-            x_num, x_cat = x_num.to(device), x_cat.to(device)
-            outputs = model(x_cat, x_num)
+            x_num = x_num.to(device)
+            x_cat = x_cat.to(device)
+            
+            # TabTransformer expects (x_cat, x_num)
+            if model_type == "tab_transformer":
+                outputs = model(x_cat, x_num)
+            # FFNN expects (x_num, x_cat)
+            else:
+                outputs = model(x_num, x_cat)
+                
         else:
+            # Standard case (2 items)
             data, targets = batch
             data = data.to(device)
             outputs = model(data)
@@ -548,7 +699,7 @@ def evaluate_model(
     loader,
     device=DEVICE,
     class_names=None,
-    model_type="standard",
+    model_type="ff", 
     set_name="Test",
 ):
     """
@@ -556,7 +707,7 @@ def evaluate_model(
 
     Returns
     -------
-    dict with accuracy, balanced_accuracy, f1_weighted, f1_macro
+    dict with accuracy, balanced_accuracy, f1_weighted, f1_macro, y_true, y_pred
     """
     y_true, y_pred, _ = predict(model, loader, device, model_type)
 

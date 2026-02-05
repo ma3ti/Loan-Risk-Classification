@@ -38,6 +38,14 @@ This project implements a multi-class classification system to predict loan grad
 - **Columns dropped:** 37 columns
 - **Rationale:** Columns with >80% missing contain too little signal; imputation would dominate the real data
 
+### 2.2 Collinearity Removal
+- **Threshold:** Pearson correlation > 0.95
+- **Columns dropped:** ~10 columns
+- **Method:** For each pair with r > 0.95, drop one column
+
+### 2.3 Specific Handling
+
+
 #### Special Handling: `months_since_*` Columns
 Four columns with 50-80% missing were **kept** because their missingness is informative:
 
@@ -54,17 +62,19 @@ Four columns with 50-80% missing were **kept** because their missingness is info
 
 This adds **8 features** (4 original + 4 flags).
 
-#### Operational Column Dropped
+#### Total Column Dropped
 - `next_payment_date` — operational/administrative data, not predictive of loan grade
+- `loan_purpose_category` — duplicate of a feature engineered new feature from loan_
+- `loan_title` — after feature engineering
+- `borrower_address_zip` — redundant with engineered features
+
+
 
 #### Categorical Missing Values
 - All remaining categorical columns with missing values → imputed with literal `"missing"` category
 - This allows the model to learn if missingness itself is predictive
 
-### 2.2 Collinearity Removal
-- **Threshold:** Pearson correlation > 0.95
-- **Columns dropped:** ~10 columns
-- **Method:** For each pair with r > 0.95, drop one column
+
 
 ### 2.3 Feature Transformations
 
@@ -79,7 +89,7 @@ Two columns stored as strings were converted to numeric:
 #### Date Columns — Cyclical Encoding
 Four date columns were transformed to capture temporal patterns:
 
-**Original columns:**
+**Original columns -> Dropped after creating derived features:**
 - `loan_issue_date`
 - `credit_history_earliest_line`
 - `last_payment_date`
@@ -128,6 +138,9 @@ From `borrower_address_zip`:
 | `zip_region` | Region based on first digit (0-9 → geographic regions) |
 | `zip_log_frequency` | log(1 + zip3_count) |
 
+### Dropped feature:
+- `borrower_address_zip` — redundant with engineered features
+
 ### 2.5 Loan Title Processing (NLP-lite)
 The free-text `loan_title` field was processed using pattern matching:
 
@@ -147,15 +160,16 @@ The free-text `loan_title` field was processed using pattern matching:
 | `loan_title_has_numbers` | Binary: 1 if title contains digits |
 
 ### 2.6 Dropped Features
+- `loan_title`
 - `loan_purpose_category` — redundant with engineered `loan_category`
 
 ### 2.7 Skewness Analysis
 Numeric features were analyzed for skewness:
 | Category | Criteria | Count | Treatment |
 |----------|----------|-------|-----------|
-| Normal distribution | \|skew\| ≤ 1 | 35 | StandardScaler |
-| Safe for log transform | \|skew\| > 1, no negatives | 71 | log1p + StandardScaler |
-| Contains negatives | \|skew\| > 1, has negatives | 7 | PowerTransformer (Yeo-Johnson) |
+| Normal distribution | \|skew\| ≤ 1 | 35 | Scaler |
+| Safe for log transform | \|skew\| > 1, no negatives | 71 | log1p + Scaler |
+| Contains negatives | \|skew\| > 1, has negatives | 7 | PowerTransformer (Yeo-Johnson) +  Scaler |
 
 ---
 

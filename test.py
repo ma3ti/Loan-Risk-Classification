@@ -31,7 +31,6 @@ def preprocess(dataset: pd.DataFrame, clfName: str):
         X_processed: The transformed feature matrix.
         y_true: The true encoded labels (or None if 'grade' was missing).
     """
-    # 1. Handle Target (y)
     y_true = None
     if "grade" in dataset.columns:
         # Map letters A-G to integers 0-6 to match model output
@@ -40,18 +39,13 @@ def preprocess(dataset: pd.DataFrame, clfName: str):
         y_true = dataset["grade"].map(grade_map).values
         dataset = dataset.drop(columns=["grade"])
     
-    # 2. Resolve Preprocessor Path
     path = f"models/{clfName}_preprocessor.pkl"
     if not os.path.exists(path):
         raise FileNotFoundError(f"Preprocessor for method '{clfName}' not found at {path}")
 
-    # 3. Load & Transform (X)
     with open(path, "rb") as f:
         preprocessor = pickle.load(f)
-    
     X_processed = preprocessor.transform(dataset)
-    
-    # Return tuple (X, y) so predict() can score it
     return X_processed, y_true
 
 
@@ -60,12 +54,10 @@ def load(clfName: str):
     Loads {clfName}_classifier.pkl.
     """
     path = f"models/{clfName}_classifier.pkl"
-
     if not os.path.exists(path):
         raise FileNotFoundError(f"Classifier for method '{clfName}' not found at {path}")
-        
     print(f"Loading classifier from {path}...")
-    
+
     with open(path, "rb") as f:
         if clfName in ['ff', 'tb', 'tf']:
             try:
@@ -93,7 +85,6 @@ def predict(dataset_processed, model):
     Returns:
         dict: {'acc': float, 'bacc': float, 'f1': float, 'predictions': array}
     """
-    # 1. Unpack Input
     # Check if input is a tuple (X, y) from our new preprocess
     if isinstance(dataset_processed, tuple):
         X, y_true = dataset_processed
@@ -101,42 +92,54 @@ def predict(dataset_processed, model):
         X = dataset_processed
         y_true = None
 
-    # 2. Generate Predictions (Indices 0-6)
-    # -------------------------------------
+    # Generate Predictions (Indices 0-6)
     # PyTorch
     if isinstance(model, torch.nn.Module):
+        # Convert to Tensor if needed
         if not isinstance(X, torch.Tensor):
             X_tensor = torch.tensor(X, dtype=torch.float32)
         else:
             X_tensor = X
             
         with torch.no_grad():
-            logits = model(X_tensor)
+            # SPECIFIC FIX FOR FFNN WITH EMBEDDINGS
+            # We check if the model has an 'embeddings' attribute (ModuleList)
+            if hasattr(model, 'embeddings') and isinstance(model.embeddings, torch.nn.ModuleList):
+                # Logic: The categorical features are usually appended at the end of X.
+                # Number of cat columns = number of embedding layers
+                n_cat = len(model.embeddings)
+                n_num = X_tensor.shape[1] - n_cat
+                
+                # Split: Numerics are first, Categoricals are last
+                x_num = X_tensor[:, :n_num]
+                # Cast categoricals to Long (int64) for Embedding layers
+                x_cat = X_tensor[:, n_num:].long() 
+                
+                logits = model(x_num, x_cat)
+            
+            # STANDARD FORWARD (TabTransformer/TabNet or simple FFNN)
+            else:
+                logits = model(X_tensor)
+            
             y_pred_idx = torch.argmax(logits, dim=1).numpy()
-    # Scikit-Learn
+
+    # CASE 2: Scikit-Learn / TabNet Wrappers
     else:
         y_pred_idx = model.predict(X)
     
-    # Map indices back to labels (A-G) for the final output
+    # --- Map & Score ---
     labels_map = np.array(['A', 'B', 'C', 'D', 'E', 'F', 'G'])
     try:
         y_pred_labels = labels_map[y_pred_idx]
     except IndexError:
-        y_pred_labels = y_pred_idx # Fallback
+        y_pred_labels = y_pred_idx 
 
-    # 3. Calculate Metrics (If y_true is available)
-    # ---------------------------------------------
     metrics = {
-        'acc': -1.0,
-        'bacc': -1.0,
-        'f1': -1.0,
-        'predictions': y_pred_labels # Keeping predictions accessible
+        'acc': -1.0, 'bacc': -1.0, 'f1': -1.0,
+        'predictions': y_pred_labels
     }
 
     if y_true is not None:
-        # Ensure y_true has no NaNs (metrics will crash otherwise)
-        # We calculate metrics using the INDICES (0-6), not the Letters
-        # because y_true was mapped to 0-6 in preprocess
         try:
             metrics['acc'] = accuracy_score(y_true, y_pred_idx)
             metrics['bacc'] = balanced_accuracy_score(y_true, y_pred_idx)
