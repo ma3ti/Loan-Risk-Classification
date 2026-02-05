@@ -5,11 +5,10 @@ All DL model definitions, datasets, training loops, and evaluation utilities.
 
 Public API:
     LoanDataset                   – PyTorch Dataset for tabular data
-    TabularDataset                – PyTorch Dataset that splits num/cat (for TabTransformer/FTTransformer)
+    TabularDataset                – PyTorch Dataset that splits num/cat (for TabTransformer)
     LoanClassifierFFNN            – Feed-forward neural network
     build_tabnet_classifier(...)  – Configure & return TabNetClassifier
     build_tab_transformer(...)    – Configure & return TabTransformer from library
-    build_ft_transformer(...)     – Configure & return FTTransformer (attention on ALL features)
     train_model(...)              – Generic training loop with early stopping
     evaluate_model(...)           – Compute metrics on a loader
     plot_losses(...)              – Plot training vs validation loss
@@ -47,31 +46,6 @@ from config import DEVICE, MODEL_DIR, SEED
 # ══════════════════════════════════════════════════════════════════════════════
 # 1.  DATASETS
 # ══════════════════════════════════════════════════════════════════════════════
-
-# class LoanDataset(Dataset):
-#     """Generic tabular dataset: all features as a single float tensor."""
-#     def __init__(self, X: np.ndarray, y: np.ndarray):
-#         self.X = torch.FloatTensor(X)
-#         self.y = torch.LongTensor(y)
-#         self.num_features = X.shape[1]
-#         self.num_classes = len(np.unique(y))
-
-#         # Validate labels are in [0, num_classes) — an out-of-range label
-#         # causes a silent CUDA kernel error that surfaces later as
-#         # "device-side assert triggered" (often inside fix_random or
-#         # an unrelated call).
-#         y_min, y_max = int(self.y.min()), int(self.y.max())
-#         assert y_min >= 0 and y_max < self.num_classes, (
-#             f"Labels out of range: min={y_min}, max={y_max}, "
-#             f"num_classes={self.num_classes}.  "
-#             f"Check your LabelEncoder / target encoding."
-#         )
-
-#     def __len__(self):
-#         return len(self.y)
-
-#     def __getitem__(self, idx):
-#         return self.X[idx], self.y[idx]
 
 
 class LoanDataset(Dataset):
@@ -616,39 +590,6 @@ def train_model(
 # ══════════════════════════════════════════════════════════════════════════════
 # EVALUATION
 # ══════════════════════════════════════════════════════════════════════════════
-
-# @torch.no_grad()
-# def predict(model, loader, device=DEVICE, model_type="ff"):
-#     """
-#     Run inference on a DataLoader.
-
-#     Returns
-#     -------
-#     y_true, y_pred, y_logits  (all numpy arrays)
-#     """
-#     model.eval()
-#     all_true, all_pred, all_logits = [], [], []
-
-#     for batch in loader:
-#         if model_type == "tab_transformer":
-#             x_num, x_cat, targets = batch
-#             x_num, x_cat = x_num.to(device), x_cat.to(device)
-#             outputs = model(x_cat, x_num)
-#         else:
-#             data, targets = batch
-#             data = data.to(device)
-#             outputs = model(data)
-
-#         _, predicted = torch.max(outputs, 1)
-#         all_true.append(targets.cpu().numpy())
-#         all_pred.append(predicted.cpu().numpy())
-#         all_logits.append(outputs.cpu().numpy())
-
-#     return (
-#         np.concatenate(all_true),
-#         np.concatenate(all_pred),
-#         np.concatenate(all_logits),
-#     )
 
 
 @torch.no_grad()

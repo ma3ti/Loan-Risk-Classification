@@ -76,25 +76,25 @@ def load(clfName: str):
     return clf
 
 
-def predict(dataset_processed, model):
+def predict(dataset, clf):
     """
     Predicts and evaluates.
     Input:
-        dataset_processed: Tuple (X, y) OR just X (if no labels available)
-        model: Loaded model
+        dataset: Tuple (X, y) OR just X (if no labels available)
+        clf: Loaded model
     Returns:
         dict: {'acc': float, 'bacc': float, 'f1': float, 'predictions': array}
     """
     # Check if input is a tuple (X, y) from our new preprocess
-    if isinstance(dataset_processed, tuple):
-        X, y_true = dataset_processed
+    if isinstance(dataset, tuple):
+        X, y_true = dataset
     else:
-        X = dataset_processed
+        X = dataset
         y_true = None
 
     # Generate Predictions (Indices 0-6)
     # PyTorch
-    if isinstance(model, torch.nn.Module):
+    if isinstance(clf, torch.nn.Module):
         # Convert to Tensor if needed
         if not isinstance(X, torch.Tensor):
             X_tensor = torch.tensor(X, dtype=torch.float32)
@@ -104,10 +104,10 @@ def predict(dataset_processed, model):
         with torch.no_grad():
             # SPECIFIC FIX FOR FFNN WITH EMBEDDINGS
             # We check if the model has an 'embeddings' attribute (ModuleList)
-            if hasattr(model, 'embeddings') and isinstance(model.embeddings, torch.nn.ModuleList):
+            if hasattr(clf, 'embeddings') and isinstance(clf.embeddings, torch.nn.ModuleList):
                 # Logic: The categorical features are usually appended at the end of X.
                 # Number of cat columns = number of embedding layers
-                n_cat = len(model.embeddings)
+                n_cat = len(clf.embeddings)
                 n_num = X_tensor.shape[1] - n_cat
                 
                 # Split: Numerics are first, Categoricals are last
@@ -115,17 +115,17 @@ def predict(dataset_processed, model):
                 # Cast categoricals to Long (int64) for Embedding layers
                 x_cat = X_tensor[:, n_num:].long() 
                 
-                logits = model(x_num, x_cat)
+                logits = clf(x_num, x_cat)
             
             # STANDARD FORWARD (TabTransformer/TabNet or simple FFNN)
             else:
-                logits = model(X_tensor)
+                logits = clf(X_tensor)
             
             y_pred_idx = torch.argmax(logits, dim=1).numpy()
 
     # CASE 2: Scikit-Learn / TabNet Wrappers
     else:
-        y_pred_idx = model.predict(X)
+        y_pred_idx = clf.predict(X)
     
     # --- Map & Score ---
     labels_map = np.array(['A', 'B', 'C', 'D', 'E', 'F', 'G'])
